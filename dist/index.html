@@ -33,7 +33,7 @@
         <label>رمز العميل<input name="code" dir="ltr" autocomplete="off" required></label>
         <button>استخدام الرمز</button>
       </form>
-      <h3>إضافة باقة</h3>
+      <h3 id="offer-form-title">إضافة باقة</h3>
       <form class="grid" id="offer-form">
         <label>اسم الباقة<input name="name" maxlength="120" required></label>
         <label>اسم المطعم أو الفرع<input name="venue" maxlength="120" required></label>
@@ -48,7 +48,8 @@
         <label>بداية التوفر بتوقيت الرياض<input name="starts_at" type="datetime-local" required></label>
         <label>نهاية التوفر بتوقيت الرياض<input name="ends_at" type="datetime-local" required></label>
         <label class="check"><input name="north" type="checkbox"> شمال الرياض</label>
-        <button>حفظ مسودة</button>
+        <button id="save-offer">حفظ مسودة</button>
+        <button id="cancel-edit" type="button" hidden>إلغاء التعديل</button>
       </form>
       <h3>باقات منشأتي</h3>
       <div id="merchant-offers" class="cards"></div>
