@@ -11,6 +11,7 @@ const mealLabels = { lunch: 'غداء', dinner: 'عشاء', both: 'غداء وع
 const selected = new Map();
 const vouchers = new Map();
 let session;
+let editingOffer;
 let merchant;
 let searchSequence = 0;
 
@@ -81,6 +82,7 @@ function explain(error) {
     INVALID_PASSWORD: 'تأكد من البريد الإلكتروني وكلمة المرور.',
     EMAIL_EXISTS: 'هذا البريد مسجل بالفعل. جرّب تسجيل الدخول.',
     EMAIL_UNVERIFIED: 'أكد بريدك أولًا. يمكنك إعادة إرسال رابط التأكيد.',
+    ACTIVE_VOUCHERS: 'ما تقدر تعدّل الباقة وفيها رموز سارية. جرّب بعد استخدامها أو انتهاء صلاحيتها.',
     ISSUE_DENIED: 'تعذّر إصدار الرمز. تحقق من توفر الباقة ومن عدم وجود رمز ساري لها. الحد عشرة رموز في الساعة.',
     MERCHANT_REQUIRED: 'تحتاج حساب تاجر معتمد لإضافة باقة.',
     AUTH_REQUIRED: 'سجّل الدخول للمتابعة.',
@@ -111,6 +113,7 @@ function submit(id, handler) {
 function clearSession() {
   session?.close();
   session = undefined;
+  resetOfferForm();
   merchant = undefined;
   vouchers.clear();
   byId('details').close();
@@ -138,6 +141,31 @@ async function fetchMerchant() {
   if (merchant?.approved) await fetchMerchantOffers();
 }
 
+function resetOfferForm() {
+  editingOffer = undefined;
+  byId('offer-form').reset();
+  byId('offer-form-title').textContent = 'إضافة باقة';
+  byId('save-offer').textContent = 'حفظ مسودة';
+  byId('cancel-edit').hidden = true;
+}
+
+function editOffer(offer) {
+  const controls = byId('offer-form').elements;
+  const localTime = value => new Date(Date.parse(value) + 3 * 3600000).toISOString().slice(0, 16);
+  for (const key of ['name', 'venue', 'district', 'address', 'latitude', 'longitude', 'people', 'meal', 'inclusions']) {
+    controls.namedItem(key).value = offer[key];
+  }
+  controls.namedItem('price').value = offer.price_halalas / 100;
+  controls.namedItem('north').checked = Boolean(offer.north);
+  controls.namedItem('starts_at').value = localTime(offer.starts_at);
+  controls.namedItem('ends_at').value = localTime(offer.ends_at);
+  editingOffer = offer.id;
+  byId('offer-form-title').textContent = 'تعديل الباقة';
+  byId('save-offer').textContent = 'حفظ التعديلات';
+  byId('cancel-edit').hidden = false;
+  controls.namedItem('name').focus();
+}
+
 async function fetchMerchantOffers() {
   const actor = session.user.id;
   const offers = await api('/api/merchant/offers', { signedIn: true });
@@ -157,7 +185,8 @@ async function fetchMerchantOffers() {
         control.disabled = false;
       }
     });
-    card.append(node('h3', offer.name), node('p', offer.published ? 'منشورة' : 'مسودة'), control);
+    card.append(node('h3', offer.name), node('p', offer.published ? 'منشورة' : 'مسودة'),
+      control, button('عدّل الباقة', () => editOffer(offer)));
     return card;
   }));
 }
@@ -339,12 +368,14 @@ submit('merchant-application', async ({ name }) => {
   });
   await fetchMerchant();
 });
-submit('offer-form', async (values, _, form) => {
+byId('cancel-edit').addEventListener('click', resetOfferForm);
+submit('offer-form', async values => {
+  const id = editingOffer;
   const startsAt = values.starts_at + '+03:00';
   const endsAt = values.ends_at + '+03:00';
   if (new Date(startsAt) >= new Date(endsAt)) return status('اختر نهاية توفر بعد البداية.');
-  await api('/api/merchant/offers', {
-    signedIn: true, method: 'POST',
+  await api('/api/merchant/offers' + (id ? '/' + id : ''), {
+    signedIn: true, method: id ? 'PUT' : 'POST',
     body: {
       name: values.name.trim(), venue: values.venue.trim(),
       district: values.district.trim(), address: values.address.trim(),
@@ -354,9 +385,9 @@ submit('offer-form', async (values, _, form) => {
       starts_at: startsAt, ends_at: endsAt,
     },
   });
-  form.reset();
-  await fetchMerchantOffers();
-  status('تم حفظ المسودة.');
+  if (editingOffer === id) resetOfferForm();
+  await Promise.all([fetchMerchantOffers(), searchOffers()]);
+  status(id ? 'تم حفظ تعديلات الباقة.' : 'تم حفظ المسودة.');
 });
 submit('redeem', async ({ code }, _, form) => {
   code = code.trim().toLowerCase();
