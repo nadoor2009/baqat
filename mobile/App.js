@@ -69,6 +69,7 @@ function Mobile() {
   const [credentials, setCredentials] = useState({ email: '', password: '' });
   const [merchantName, setMerchantName] = useState('');
   const [draft, setDraft] = useState(emptyOffer);
+  const [editingOffer, setEditingOffer] = useState(null);
   const [codeInput, setCodeInput] = useState('');
   const [vouchers, setVouchers] = useState({});
   const [note, setNote] = useState('');
@@ -84,9 +85,11 @@ function Mobile() {
   }
 
   function signOut() {
+    token?.close();
     setToken(null);
     setMerchant(null);
     setMerchantOffers([]);
+    cancelEdit();
     setVouchers({});
   }
 
@@ -156,14 +159,32 @@ function Mobile() {
     });
   }
 
-  function createOffer() {
+  function cancelEdit() {
+    setEditingOffer(null);
+    setDraft(emptyOffer);
+  }
+
+  function editOffer(item) {
+    const localTime = value => new Date(Date.parse(value) + 3 * 3600000)
+      .toISOString().slice(0, 16).replace('T', ' ');
+    const fields = Object.fromEntries(offerFields.map(([key]) => [key, String(item[key] ?? '')]));
+    setDraft({
+      ...fields, price: String(item.price_halalas / 100), meal: item.meal, north: Boolean(item.north),
+      starts_at: localTime(item.starts_at), ends_at: localTime(item.ends_at),
+    });
+    setEditingOffer(item.id);
+    scroll.current?.scrollToEnd({ animated: true });
+  }
+
+  function saveOffer() {
     return run(async () => {
       const time = key => {
         const value = normalize(draft[key] || '').replace(' ', 'T');
         if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error('INVALID_INPUT');
         return value + ':00+03:00';
       };
-      await api('merchant/offers', { token, method: 'POST', body: {
+      const path = 'merchant/offers' + (editingOffer ? '/' + editingOffer : '');
+      await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
         ...draft,
         latitude: Number(normalize(draft.latitude || '')),
         longitude: Number(normalize(draft.longitude || '')),
@@ -172,9 +193,10 @@ function Mobile() {
         starts_at: time('starts_at'),
         ends_at: time('ends_at'),
       } });
-      setDraft(emptyOffer);
+      cancelEdit();
       await refreshMerchant(token);
-      setNote('تم حفظ المسودة.');
+      if (searched) await search();
+      setNote(editingOffer ? 'تم حفظ تعديلات الباقة.' : 'تم حفظ المسودة.');
     });
   }
 
@@ -277,9 +299,10 @@ function Mobile() {
           {merchantOffers.map(item => <Card key={item.id}>
             <Copy>{item.name} · {item.published ? 'منشورة' : 'مسودة'}</Copy>
             <Button label={item.published ? 'أوقف النشر' : 'انشر الباقة'} disabled={busy} onPress={() => publish(item)} />
+            <Button label="عدّل الباقة" secondary disabled={busy} onPress={() => editOffer(item)} />
           </Card>)}
           <Card>
-            <Title>أضف باقة</Title>
+            <Title>{editingOffer ? 'تعديل الباقة' : 'أضف باقة'}</Title>
             {offerFields.map(([key, label, numeric, placeholder]) => <Input key={key} label={label}
               value={draft[key] || ''} keyboardType={numeric ? 'decimal-pad' : 'default'}
               placeholder={placeholder} ltr={numeric || !!placeholder}
@@ -287,7 +310,8 @@ function Mobile() {
             <Choices options={meals} value={draft.meal} change={meal => setDraft({ ...draft, meal })} />
             <Choices options={[[true, 'شمال الرياض'], [false, 'بقية الرياض']]} value={draft.north}
               change={north => setDraft({ ...draft, north })} />
-            <Button label="احفظ المسودة" disabled={busy} onPress={createOffer} />
+            <Button label={editingOffer ? 'احفظ التعديلات' : 'احفظ المسودة'} disabled={busy} onPress={saveOffer} />
+            {!!editingOffer && <Button label="إلغاء التعديل" secondary disabled={busy} onPress={cancelEdit} />}
           </Card>
         </> : null}
       </ScrollView>

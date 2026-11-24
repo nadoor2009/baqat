@@ -1,11 +1,13 @@
+import { createSession } from './session.mjs';
 const origin = 'https://baqat.naderalmutairi50.workers.dev';
 
 export async function api(path, { token, method = 'GET', body } = {}) {
+  const accessToken = token ? await token.accessToken() : null;
   const response = await fetch(origin + '/api/' + path, {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -35,7 +37,7 @@ export async function authenticate(mode, email, password) {
     await firebase('sendOobCode', { requestType: 'VERIFY_EMAIL', idToken: user.idToken });
     return null;
   }
-  return user.idToken;
+  return createSession(user, apiKey);
 }
 
 export function errorMessage(error) {
@@ -45,6 +47,8 @@ export function errorMessage(error) {
     EMAIL_UNVERIFIED: 'أكّد بريدك الإلكتروني أولًا. تقدر تعيد إرسال رسالة التأكيد.',
     AUTH_UNCONFIGURED: 'خدمة تسجيل الحسابات غير متاحة الآن.',
     AUTH_REQUIRED: 'سجّل الدخول من جديد للمتابعة.',
+    OFFER_LIMIT: 'وصلت إلى الحد الأقصى وهو ١٠٠ باقة لم ينتهِ توفرها.',
+    ACTIVE_VOUCHERS: 'ما تقدر تعدّل الباقة وفيها رموز سارية. جرّب بعد استخدامها أو انتهاء صلاحيتها.',
     ISSUE_DENIED: 'تعذّر إصدار الرمز. قد تكون الباقة غير متاحة الآن أو عندك رمز ساري لها.',
     OFFER_UNAVAILABLE: 'الباقة غير متاحة.',
     INVALID_INPUT: 'راجع البيانات المدخلة وحاول مرة أخرى.',
