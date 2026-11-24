@@ -1,3 +1,4 @@
+import { createSession } from './session.mjs';
 'use strict';
 
 const byId = id => document.getElementById(id);
@@ -42,10 +43,18 @@ function riyadhDate() {
 }
 
 async function api(path, options = {}) {
+  const requestSession = session;
   const headers = { 'Content-Type': 'application/json' };
   if (options.signedIn) {
-    if (!session?.access_token) throw new Error('AUTH_REQUIRED');
-    headers.Authorization = 'Bearer ' + session.access_token;
+    const current = session;
+    if (!current) throw new Error('AUTH_REQUIRED');
+    try {
+      headers.Authorization = 'Bearer ' + await current.accessToken();
+    } catch (error) {
+      if (error.message === 'AUTH_REQUIRED' && session === current) clearSession();
+      throw error;
+    }
+    if (session !== current) throw new Error('AUTH_REQUIRED');
   }
   const response = await fetch(path, {
     method: options.method || 'GET',
@@ -55,7 +64,7 @@ async function api(path, options = {}) {
   const result = response.status === 204 ? null : await response.json();
   if (!response.ok) {
     if (response.status === 401 && options.signedIn) {
-      clearSession();
+      if (session === requestSession) clearSession();
       throw new Error('AUTH_REQUIRED');
     }
     throw new Error(result?.message || result?.error_code || 'REQUEST_FAILED');
@@ -67,6 +76,10 @@ function explain(error) {
   return {
     AUTH_UNCONFIGURED: 'خدمة تسجيل الحسابات لم تُربط بعد.',
     AUTH_UNAVAILABLE: 'تعذّر تسجيل الدخول أو إرسال رسالة التأكيد. تحقق من البريد وكلمة المرور وحاول مجددًا.',
+    INVALID_LOGIN_CREDENTIALS: 'تأكد من البريد الإلكتروني وكلمة المرور.',
+    EMAIL_NOT_FOUND: 'تأكد من البريد الإلكتروني وكلمة المرور.',
+    INVALID_PASSWORD: 'تأكد من البريد الإلكتروني وكلمة المرور.',
+    EMAIL_EXISTS: 'هذا البريد مسجل بالفعل. جرّب تسجيل الدخول.',
     EMAIL_UNVERIFIED: 'أكد بريدك أولًا. يمكنك إعادة إرسال رابط التأكيد.',
     ISSUE_DENIED: 'تعذّر إصدار الرمز. تحقق من توفر الباقة ومن عدم وجود رمز ساري لها. الحد عشرة رموز في الساعة.',
     MERCHANT_REQUIRED: 'تحتاج حساب تاجر معتمد لإضافة باقة.',
@@ -96,6 +109,7 @@ function submit(id, handler) {
 }
 
 function clearSession() {
+  session?.close();
   session = undefined;
   merchant = undefined;
   vouchers.clear();
@@ -295,8 +309,9 @@ async function firebase(action, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new Error('AUTH_UNAVAILABLE');
-  return response.json();
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || 'AUTH_UNAVAILABLE');
+  return data;
 }
 
 submit('auth', async ({ email, password }, action, form) => {
@@ -309,7 +324,7 @@ submit('auth', async ({ email, password }, action, form) => {
     await firebase('sendOobCode', { requestType: 'VERIFY_EMAIL', idToken: result.idToken });
     return status('أرسلنا رابط تأكيد البريد. افتح الرابط ثم سجّل الدخول.');
   }
-  session = { access_token: result.idToken, user: { id: result.localId } };
+  session = createSession(result, firebaseConfig.apiKey);
   try {
     await fetchMerchant();
   } catch (error) {
