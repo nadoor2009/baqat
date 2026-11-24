@@ -6,7 +6,10 @@
     "orientation": "portrait",
     "ios": {
       "bundleIdentifier": "com.alvra.baqat",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.alvra.baqat"
