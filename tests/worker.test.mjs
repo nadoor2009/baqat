@@ -58,3 +58,33 @@ test('voucher issues once and can be used once only by the owner before expiry',
   sqlite.exec("UPDATE vouchers SET expires_at = '2000-01-01T00:00:00.000Z' WHERE redeemed_at IS NULL");
   assert.deepEqual(await redeem(expired), []);
 });
+
+test('merchant approval requires an allowlisted verified account and is idempotent', async t => {
+  const sqlite = new DatabaseSync(':memory:');
+  t.after(() => sqlite.close());
+  sqlite.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
+  const prepare = sql => ({
+    bind: (...parameters) => ({ first: async () => sqlite.prepare(sql).get(...parameters) }),
+    all: async () => ({ results: sqlite.prepare(sql).all() }),
+  });
+  const admin = 'verified-administrator-account';
+  const applicant = 'verified-merchant-applicant';
+  t.mock.method(globalThis, 'fetch', async (url, request) => Response.json({
+    users: [{ localId: JSON.parse(request.body).idToken, emailVerified: true }],
+  }));
+  const env = { DB: { prepare }, FIREBASE_API_KEY: 'test-key', BAQAT_ADMIN_UIDS: admin };
+  const request = (path, token, body) => worker.fetch(new Request('https://baqat.local/api/' + path, {
+    method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token },
+    body: body ? JSON.stringify(body) : undefined,
+  }), env);
+  assert.equal((await request('merchant', applicant, { name: 'Test Merchant' })).status, 201);
+  assert.equal((await request('merchant', applicant, { name: 'Different name' })).status, 200);
+  assert.equal((await request('admin/merchants', applicant)).status, 403);
+  assert.equal((await request('admin/merchants', applicant, { user_id: applicant })).status, 403);
+  const pending = await (await request('admin/merchants', admin)).json();
+  assert.deepEqual(pending, [{ user_id: applicant, name: 'Test Merchant' }]);
+  assert.equal((await request('admin/merchants', admin, { user_id: applicant })).status, 200);
+  assert.equal((await request('admin/merchants', admin, { user_id: applicant })).status, 409);
+  const account = await (await request('account', applicant)).json();
+  assert.deepEqual(account, { merchant: { name: 'Test Merchant', approved: 1 }, admin: false });
+});
