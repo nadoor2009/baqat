@@ -118,9 +118,14 @@ async function createOffer(db, uid, input) {
     )
     SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     FROM merchants m WHERE m.user_id = ? AND m.approved = 1
+      AND (SELECT count(*) FROM offers WHERE merchant_id = m.user_id AND ends_at > ?) < 100
     RETURNING id
-  `).bind(crypto.randomUUID(), ...offerValues(input), uid).first();
-  if (!result) throw new ApiError(403, 'MERCHANT_REQUIRED');
+  `).bind(crypto.randomUUID(), ...offerValues(input), uid, iso(Date.now())).first();
+  if (!result) {
+    const merchant = await db.prepare('SELECT approved FROM merchants WHERE user_id = ?').bind(uid).first();
+    if (!merchant?.approved) throw new ApiError(403, 'MERCHANT_REQUIRED');
+    throw new ApiError(409, 'OFFER_LIMIT');
+  }
   return result;
 }
 
@@ -187,6 +192,30 @@ async function redeem(db, uid, code) {
   return used ? [used] : [];
 }
 
+function adminUids(env) {
+  return (env.BAQAT_ADMIN_UIDS || '').split(',').map(uid => uid.trim()).filter(Boolean);
+}
+
+async function reviewMerchants(request, db, uid, env) {
+  if (!adminUids(env).includes(uid)) throw new ApiError(403, 'ADMIN_REQUIRED');
+  if (request.method === 'GET') {
+    const { results } = await db.prepare(
+      'SELECT user_id, name FROM merchants WHERE approved = 0 ORDER BY name, user_id LIMIT 100',
+    ).all();
+    return json(results);
+  }
+  if (request.method === 'POST') {
+    const input = await body(request);
+    const userId = string(input.user_id, 1, 128);
+    const merchant = await db.prepare(
+      'UPDATE merchants SET approved = 1 WHERE user_id = ? AND approved = 0 RETURNING user_id',
+    ).bind(userId).first();
+    if (!merchant) throw new ApiError(409, 'MERCHANT_NOT_PENDING');
+    return json({ approved: true });
+  }
+  return json({ message: 'NOT_FOUND' }, 404);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -198,6 +227,11 @@ export default {
       if (method === 'GET' && path === '/api/offers') return json(await search(url.searchParams, env.DB));
       const uid = await actor(request, env);
       const db = env.DB;
+      if (path === '/api/account' && method === 'GET') {
+        const merchant = await db.prepare('SELECT name, approved FROM merchants WHERE user_id = ?').bind(uid).first();
+        return json({ merchant: merchant ?? null, admin: adminUids(env).includes(uid) });
+      }
+      if (path === '/api/admin/merchants') return await reviewMerchants(request, db, uid, env);
       if (path === '/api/merchant') {
         if (method === 'GET') {
           const profile = await db.prepare('SELECT name, approved FROM merchants WHERE user_id = ?').bind(uid).first();
@@ -205,9 +239,9 @@ export default {
         }
         if (method === 'POST') {
           const input = await body(request);
-          await db.prepare('INSERT INTO merchants (user_id, name) VALUES (?, ?) ON CONFLICT(user_id) DO NOTHING')
-            .bind(uid, string(input.name, 2, 100)).run();
-          return json({}, 201);
+          const added = await db.prepare('INSERT INTO merchants (user_id, name) VALUES (?, ?) ON CONFLICT(user_id) DO NOTHING RETURNING user_id')
+            .bind(uid, string(input.name, 2, 100)).first();
+          return json({ created: Boolean(added) }, added ? 201 : 200);
         }
       }
       if (path === '/api/merchant/offers') {
@@ -240,6 +274,7 @@ export default {
       return json({ message: 'NOT_FOUND' }, 404);
     } catch (error) {
       if (error instanceof ApiError) return json({ message: error.message }, error.status);
+      console.error(JSON.stringify({ event: 'baqat_api_failed', method, errorType: error?.name || 'Error' }));
       return json({ message: 'REQUEST_FAILED' }, 500);
     }
   },
