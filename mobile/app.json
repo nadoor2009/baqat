@@ -4,7 +4,18 @@
     "slug": "baqat-riyadh",
     "version": "1.0.0",
     "orientation": "portrait",
-    "ios": { "bundleIdentifier": "com.alvra.baqat", "supportsTablet": true },
-    "android": { "package": "com.alvra.baqat" }
+    "ios": {
+      "bundleIdentifier": "com.alvra.baqat",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.alvra.baqat"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "dd06d12f-ab00-45a8-be3a-67bc987b9400"
+      }
+    },
+    "owner": "nader-fahad"
   }
 }
