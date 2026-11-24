@@ -95,12 +95,22 @@ async function search(params, db) {
   return results;
 }
 
-async function createOffer(db, uid, input) {
+function offerValues(input) {
   const { meal, north } = input;
   requireValid(meals.has(meal) && typeof north === 'boolean');
   const starts = Date.parse(string(input.starts_at, 16, 32));
   const ends = Date.parse(string(input.ends_at, 16, 32));
   requireValid(Number.isFinite(starts) && Number.isFinite(ends) && ends > Math.max(starts, Date.now()));
+  return [
+    string(input.name, 2, 120), string(input.venue, 2, 120),
+    string(input.district, 2, 80), string(input.address, 3, 240), Number(north),
+    number(input.latitude, 24.35, 25.10), number(input.longitude, 46.30, 47.10),
+    number(input.price_halalas, 100, 10000000, true), number(input.people, 1, 100, true),
+    meal, string(input.inclusions, 3, 1800), iso(starts), iso(ends),
+  ];
+}
+
+async function createOffer(db, uid, input) {
   const result = await db.prepare(`
     INSERT INTO offers (
       id, merchant_id, name, venue, district, address, north, latitude, longitude,
@@ -109,13 +119,30 @@ async function createOffer(db, uid, input) {
     SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     FROM merchants m WHERE m.user_id = ? AND m.approved = 1
     RETURNING id
-  `).bind(crypto.randomUUID(), string(input.name, 2, 120), string(input.venue, 2, 120),
-    string(input.district, 2, 80), string(input.address, 3, 240), Number(north),
-    number(input.latitude, 24.35, 25.10), number(input.longitude, 46.30, 47.10),
-    number(input.price_halalas, 100, 10000000, true), number(input.people, 1, 100, true),
-    meal, string(input.inclusions, 3, 1800), iso(starts), iso(ends), uid).first();
+  `).bind(crypto.randomUUID(), ...offerValues(input), uid).first();
   if (!result) throw new ApiError(403, 'MERCHANT_REQUIRED');
   return result;
+}
+
+async function editOffer(db, uid, id, input) {
+  const result = await db.prepare(`
+    UPDATE offers SET name = ?, venue = ?, district = ?, address = ?, north = ?,
+      latitude = ?, longitude = ?, price_halalas = ?, people = ?, meal = ?,
+      inclusions = ?, starts_at = ?, ends_at = ?
+    WHERE id = ? AND merchant_id = ?
+      AND EXISTS (SELECT 1 FROM merchants WHERE user_id = ? AND approved = 1)
+      AND NOT EXISTS (
+        SELECT 1 FROM vouchers WHERE offer_id = offers.id AND redeemed_at IS NULL AND expires_at > ?
+      )
+    RETURNING id
+  `).bind(...offerValues(input), id, uid, uid, iso(Date.now())).first();
+  if (result) return result;
+  const own = await db.prepare(`
+    SELECT o.id FROM offers o JOIN merchants m ON m.user_id = o.merchant_id
+    WHERE o.id = ? AND m.user_id = ? AND m.approved = 1
+  `).bind(id, uid).first();
+  if (!own) throw new ApiError(404, 'OFFER_UNAVAILABLE');
+  throw new ApiError(409, 'ACTIVE_VOUCHERS');
 }
 
 async function hash(code) {
@@ -185,13 +212,17 @@ export default {
       }
       if (path === '/api/merchant/offers') {
         if (method === 'GET') {
-          const { results } = await db.prepare('SELECT id, name, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
+          const { results } = await db.prepare('SELECT id, name, venue, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, starts_at, ends_at, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
             .bind(uid).all();
           return json(results);
         }
         if (method === 'POST') return json(await createOffer(db, uid, await body(request)), 201);
       }
       const update = /^\/api\/merchant\/offers\/([a-f0-9-]+)$/.exec(path);
+      if (update && method === 'PUT') {
+        requireValid(uuid.test(update[1]));
+        return json(await editOffer(db, uid, update[1], await body(request)));
+      }
       if (update && method === 'PATCH') {
         const input = await body(request);
         requireValid(uuid.test(update[1]) && typeof input.published === 'boolean');
