@@ -3,6 +3,9 @@ main = "worker/index.mjs"
 compatibility_date = "2025-09-01"
 keep_vars = true
 
+[vars]
+FIREBASE_API_KEY = "AIzaSyC-r9bZ4FhfqAYoPbk0PL3A_nNYdBnzTO0"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
