@@ -1,8 +1,7 @@
 'use strict';
 
 const byId = id => document.getElementById(id);
-const config = window.BAQAT_CONFIG;
-const configured = Boolean(config?.supabaseUrl && config?.publishableKey);
+let firebaseConfig;
 const dateTime = new Intl.DateTimeFormat('ar-SA', {
   timeZone: 'Asia/Riyadh', calendar: 'gregory', dateStyle: 'medium', timeStyle: 'short',
 });
@@ -43,13 +42,12 @@ function riyadhDate() {
 }
 
 async function api(path, options = {}) {
-  if (!configured) throw new Error('UNCONFIGURED');
-  const headers = { apikey: config.publishableKey, 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json' };
   if (options.signedIn) {
     if (!session?.access_token) throw new Error('AUTH_REQUIRED');
     headers.Authorization = 'Bearer ' + session.access_token;
   }
-  const response = await fetch(config.supabaseUrl.replace(/\/$/, '') + path, {
+  const response = await fetch(path, {
     method: options.method || 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -67,7 +65,11 @@ async function api(path, options = {}) {
 
 function explain(error) {
   return {
-    UNCONFIGURED: 'اتصال قاعدة بيانات باقات غير مهيأ.',
+    AUTH_UNCONFIGURED: 'خدمة تسجيل الحسابات لم تُربط بعد.',
+    AUTH_UNAVAILABLE: 'تعذّر تسجيل الدخول أو إرسال رسالة التأكيد. تحقق من البريد وكلمة المرور وحاول مجددًا.',
+    EMAIL_UNVERIFIED: 'أكد بريدك أولًا. يمكنك إعادة إرسال رابط التأكيد.',
+    ISSUE_DENIED: 'تعذّر إصدار الرمز. تحقق من توفر الباقة ومن عدم وجود رمز ساري لها. الحد عشرة رموز في الساعة.',
+    MERCHANT_REQUIRED: 'تحتاج حساب تاجر معتمد لإضافة باقة.',
     AUTH_REQUIRED: 'سجّل الدخول للمتابعة.',
     OFFER_UNAVAILABLE: 'الباقة غير متاحة لإصدار رمز الآن.',
     ISSUE_LIMIT: 'وصلت إلى حد إصدار الرموز. حاول لاحقًا.',
@@ -115,7 +117,7 @@ function renderAccount() {
 
 async function fetchMerchant() {
   const actor = session.user.id;
-  const [profile] = await api('/rest/v1/baqat_merchants?select=name,approved&user_id=eq.' + actor, { signedIn: true });
+  const [profile] = await api('/api/merchant', { signedIn: true });
   if (session?.user.id !== actor) return;
   merchant = profile;
   renderAccount();
@@ -124,14 +126,14 @@ async function fetchMerchant() {
 
 async function fetchMerchantOffers() {
   const actor = session.user.id;
-  const offers = await api('/rest/v1/baqat_offers?order=starts_at.desc&merchant_id=eq.' + actor, { signedIn: true });
+  const offers = await api('/api/merchant/offers', { signedIn: true });
   if (session?.user.id !== actor) return;
   byId('merchant-offers').replaceChildren(...offers.map(offer => {
     const card = node('article', undefined, 'card');
     const control = button(offer.published ? 'أوقف النشر' : 'انشر الباقة', async () => {
       control.disabled = true;
       try {
-        await api('/rest/v1/baqat_offers?id=eq.' + offer.id, {
+        await api('/api/merchant/offers/' + offer.id, {
           signedIn: true, method: 'PATCH', body: { published: !offer.published },
         });
         await Promise.all([fetchMerchantOffers(), searchOffers()]);
@@ -152,19 +154,12 @@ async function searchOffers() {
   const start = new Date(values.day + 'T00:00:00+03:00').getTime();
   if (!Number.isFinite(start)) return;
   const query = new URLSearchParams({
-    order: 'price_halalas.asc,id.asc',
-    limit: '100',
-    published: 'eq.true',
-    starts_at: 'lt.' + new Date(start + 86400000).toISOString(),
-    ends_at: 'gt.' + new Date(Math.max(start, Date.now())).toISOString(),
-    price_halalas: 'lte.' + Math.round(Number(values.budget) * 100),
-    people: 'gte.' + values.people,
+    day: values.day, people: values.people, meal: values.meal, area: values.area,
+    budget: Math.round(Number(values.budget) * 100),
   });
-  if (values.meal !== 'both') query.set('meal', 'in.(' + values.meal + ',both)');
-  if (values.area === 'north') query.set('north', 'eq.true');
   byId('result-count').textContent = 'جاري البحث…';
   try {
-    const offers = await api('/rest/v1/baqat_offers?' + query);
+    const offers = await api('/api/offers?' + query);
     if (version !== searchSequence) return;
     for (const id of selected.keys()) {
       const current = offers.find(offer => offer.id === id);
@@ -244,7 +239,7 @@ function showDetails(offer) {
     const actor = session.user.id;
     issue.disabled = true;
     try {
-      const [voucher] = await api('/rest/v1/rpc/baqat_issue', {
+      const [voucher] = await api('/api/vouchers', {
         signedIn: true, method: 'POST', body: { offer: offer.id },
       });
       if (session?.user.id !== actor) return;
@@ -267,14 +262,9 @@ byId('account-nav').addEventListener('click', () => {
   byId('account').hidden = !byId('account').hidden;
   if (!byId('account').hidden) byId('account-title').scrollIntoView({ block: 'nearest' });
 });
-byId('logout').addEventListener('click', async () => {
-  try {
-    await api('/auth/v1/logout', { method: 'POST', signedIn: true });
-  } catch (error) {
-    status(explain(error));
-  } finally {
-    clearSession();
-  }
+byId('logout').addEventListener('click', () => {
+  clearSession();
+  status('تم تسجيل الخروج من هذه الصفحة.');
 });
 byId('compare-button').addEventListener('click', () => {
   const table = node('table');
@@ -295,21 +285,42 @@ byId('compare-button').addEventListener('click', () => {
   byId('comparison').hidden = false;
   byId('comparison').scrollIntoView({ block: 'nearest' });
 });
+async function firebase(action, payload) {
+  if (!firebaseConfig) firebaseConfig = await api('/api/config');
+  if (!firebaseConfig.apiKey) throw new Error('AUTH_UNCONFIGURED');
+  const endpoint = 'https://identitytoolkit.googleapis.com/v1/accounts:' + action +
+    '?key=' + encodeURIComponent(firebaseConfig.apiKey);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('AUTH_UNAVAILABLE');
+  return response.json();
+}
+
 submit('auth', async ({ email, password }, action, form) => {
   const signup = action?.value === 'signup';
-  const route = signup
-    ? '/auth/v1/signup?redirect_to=' + encodeURIComponent(location.origin + location.pathname)
-    : '/auth/v1/token?grant_type=password';
-  const result = await api(route, { method: 'POST', body: { email, password } });
+  const result = await firebase(signup ? 'signUp' : 'signInWithPassword', {
+    email, password, returnSecureToken: true,
+  });
   form.reset();
-  if (!result.access_token) return status('تحقق من بريدك لتأكيد الحساب، ثم سجّل الدخول.');
-  session = result;
-  renderAccount();
-  await fetchMerchant();
+  if (signup || action?.value === 'verify') {
+    await firebase('sendOobCode', { requestType: 'VERIFY_EMAIL', idToken: result.idToken });
+    return status('أرسلنا رابط تأكيد البريد. افتح الرابط ثم سجّل الدخول.');
+  }
+  session = { access_token: result.idToken, user: { id: result.localId } };
+  try {
+    await fetchMerchant();
+  } catch (error) {
+    clearSession();
+    throw error;
+  }
+  status('تم تسجيل الدخول.');
 });
 submit('merchant-application', async ({ name }) => {
-  await api('/rest/v1/baqat_merchants', {
-    signedIn: true, method: 'POST', body: { user_id: session.user.id, name: name.trim() },
+  await api('/api/merchant', {
+    signedIn: true, method: 'POST', body: { name: name.trim() },
   });
   await fetchMerchant();
 });
@@ -317,10 +328,10 @@ submit('offer-form', async (values, _, form) => {
   const startsAt = values.starts_at + '+03:00';
   const endsAt = values.ends_at + '+03:00';
   if (new Date(startsAt) >= new Date(endsAt)) return status('اختر نهاية توفر بعد البداية.');
-  await api('/rest/v1/baqat_offers', {
+  await api('/api/merchant/offers', {
     signedIn: true, method: 'POST',
     body: {
-      merchant_id: session.user.id, name: values.name.trim(), venue: values.venue.trim(),
+      name: values.name.trim(), venue: values.venue.trim(),
       district: values.district.trim(), address: values.address.trim(),
       latitude: Number(values.latitude), longitude: Number(values.longitude),
       price_halalas: Math.round(Number(values.price) * 100), people: Number(values.people),
@@ -337,7 +348,7 @@ submit('redeem', async ({ code }, _, form) => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(code)) {
     return status('أدخل رمز الباقة الكامل.');
   }
-  const [result] = await api('/rest/v1/rpc/baqat_redeem', { signedIn: true, method: 'POST', body: { code } });
+  const [result] = await api('/api/vouchers/redeem', { signedIn: true, method: 'POST', body: { code } });
   if (!result) return status('تعذّر استخدام الرمز. قد يكون منتهيًا أو مُستخدمًا أو لباقـة أخرى.');
   form.reset();
   status('تم استخدام رمز «' + result.offer_name + '».');
