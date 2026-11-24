@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "باقات",
+    "slug": "baqat-riyadh",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "ios": { "bundleIdentifier": "com.alvra.baqat", "supportsTablet": true },
+    "android": { "package": "com.alvra.baqat" }
+  }
+}
