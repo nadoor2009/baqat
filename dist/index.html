@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4d2674">
+  <title>باقات | اكتشف الأنسب لك</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="./">باقات</a><button id="account-nav" type="button">حسابي</button></header>
+  <main>
+    <p id="status" role="status" aria-live="polite" hidden></p>
+    <section id="account" hidden aria-labelledby="account-title">
+      <h2 id="account-title">حسابي</h2>
+      <form id="auth">
+        <label>البريد الإلكتروني<input name="email" type="email" autocomplete="email" required></label>
+        <label>كلمة المرور<input name="password" type="password" minlength="8" required></label>
+        <div class="actions"><button name="action" value="login">دخول</button><button name="action" value="signup">إنشاء حساب</button></div>
+      </form>
+      <button id="logout" type="button" hidden>تسجيل الخروج</button>
+      <form id="merchant-application" hidden>
+        <label>اسم المنشأة<input name="name" maxlength="100" minlength="2" required></label>
+        <button>طلب حساب تاجر</button>
+      </form>
+      <p id="merchant-status"></p>
+    </section>
+
+    <section id="merchant" hidden aria-labelledby="merchant-title">
+      <h2 id="merchant-title">لوحة التاجر</h2>
+      <form id="redeem">
+        <label>رمز العميل<input name="code" dir="ltr" autocomplete="off" required></label>
+        <button>استخدام الرمز</button>
+      </form>
+      <h3>إضافة باقة</h3>
+      <form class="grid" id="offer-form">
+        <label>اسم الباقة<input name="name" maxlength="120" required></label>
+        <label>اسم المطعم أو الفرع<input name="venue" maxlength="120" required></label>
+        <label>الحي<input name="district" maxlength="80" required></label>
+        <label>العنوان<input name="address" maxlength="240" required></label>
+        <label>خط العرض<input name="latitude" type="number" step="any" min="24.35" max="25.10" required></label>
+        <label>خط الطول<input name="longitude" type="number" step="any" min="46.30" max="47.10" required></label>
+        <label>السعر النهائي بالريال<input name="price" type="number" min="1" max="100000" step="0.01" required></label>
+        <label>عدد الأشخاص<input name="people" type="number" min="1" max="100" required></label>
+        <label>الوجبة<select name="meal"><option value="both">الغداء والعشاء</option><option value="lunch">الغداء</option><option value="dinner">العشاء</option></select></label>
+        <label>المكونات<textarea name="inclusions" minlength="3" maxlength="1800" required></textarea></label>
+        <label>بداية التوفر بتوقيت الرياض<input name="starts_at" type="datetime-local" required></label>
+        <label>نهاية التوفر بتوقيت الرياض<input name="ends_at" type="datetime-local" required></label>
+        <label class="check"><input name="north" type="checkbox"> شمال الرياض</label>
+        <button>حفظ مسودة</button>
+      </form>
+      <h3>باقات منشأتي</h3>
+      <div id="merchant-offers" class="cards"></div>
+    </section>
+
+    <section class="hero">
+      <h1>وش تبي تأكل اليوم؟</h1>
+      <p>قارن باقات المطاعم في الرياض حسب وقتك وميزانيتك.</p>
+    </section>
+    <section aria-labelledby="search-title">
+      <h2 id="search-title">ابحث عن باقة</h2>
+      <form id="search" class="grid">
+        <label>الوجبة<select name="meal"><option value="both">الغداء والعشاء</option><option value="lunch">الغداء</option><option value="dinner">العشاء</option></select></label>
+        <label>التاريخ<input name="day" type="date" required></label>
+        <label>عدد الأشخاص<input name="people" type="number" min="1" max="100" value="2" required></label>
+        <label>الميزانية القصوى بالريال<input name="budget" type="number" min="1" max="100000" step="0.01" value="200" required></label>
+        <label>المنطقة<select name="area"><option value="north">شمال الرياض</option><option value="all">كل الرياض</option></select></label>
+        <button>اعرض الباقات</button>
+      </form>
+    </section>
+    <section aria-labelledby="results-title">
+      <div class="actions"><h2 id="results-title">الباقات</h2><button id="compare-button" type="button" disabled>قارن المختار</button></div>
+      <p id="result-count" role="status"></p>
+      <div id="results" class="cards"></div>
+      <div id="comparison" hidden></div>
+    </section>
+    <dialog id="details">
+      <form method="dialog"><button aria-label="إغلاق">إغلاق</button></form>
+      <div id="details-body"></div>
+    </dialog>
+  </main>
+</body>
+</html>
