@@ -84,6 +84,7 @@ function Mobile() {
   }
 
   function signOut() {
+    token?.close();
     setToken(null);
     setMerchant(null);
     setMerchantOffers([]);
