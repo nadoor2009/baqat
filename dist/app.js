@@ -12,6 +12,7 @@ const selected = new Map();
 const vouchers = new Map();
 let session;
 let editingOffer;
+let isAdmin = false;
 let merchant;
 let searchSequence = 0;
 
@@ -82,6 +83,9 @@ function explain(error) {
     INVALID_PASSWORD: 'تأكد من البريد الإلكتروني وكلمة المرور.',
     EMAIL_EXISTS: 'هذا البريد مسجل بالفعل. جرّب تسجيل الدخول.',
     EMAIL_UNVERIFIED: 'أكد بريدك أولًا. يمكنك إعادة إرسال رابط التأكيد.',
+    OFFER_LIMIT: 'وصلت إلى الحد الأقصى وهو ١٠٠ باقة لم ينتهِ توفرها.',
+    ADMIN_REQUIRED: 'حسابك غير مخوّل بمراجعة طلبات التجار.',
+    MERCHANT_NOT_PENDING: 'هذا الطلب لم يعد بانتظار الاعتماد. حدّث القائمة.',
     ACTIVE_VOUCHERS: 'ما تقدر تعدّل الباقة وفيها رموز سارية. جرّب بعد استخدامها أو انتهاء صلاحيتها.',
     ISSUE_DENIED: 'تعذّر إصدار الرمز. تحقق من توفر الباقة ومن عدم وجود رمز ساري لها. الحد عشرة رموز في الساعة.',
     MERCHANT_REQUIRED: 'تحتاج حساب تاجر معتمد لإضافة باقة.',
@@ -115,6 +119,8 @@ function clearSession() {
   session = undefined;
   resetOfferForm();
   merchant = undefined;
+  isAdmin = false;
+  byId('admin-requests').replaceChildren();
   vouchers.clear();
   byId('details').close();
   byId('details-body').replaceChildren();
@@ -126,6 +132,7 @@ function renderAccount() {
   byId('logout').hidden = !session;
   byId('merchant-application').hidden = !session || Boolean(merchant);
   byId('merchant').hidden = !merchant?.approved;
+  byId('admin').hidden = !isAdmin;
   byId('merchant-status').textContent = merchant
     ? merchant.approved ? 'حساب التاجر معتمد.' : 'طلب حساب التاجر بانتظار المراجعة.'
     : '';
@@ -134,12 +141,42 @@ function renderAccount() {
 
 async function fetchMerchant() {
   const actor = session.user.id;
-  const [profile] = await api('/api/merchant', { signedIn: true });
+  const account = await api('/api/account', { signedIn: true });
   if (session?.user.id !== actor) return;
-  merchant = profile;
+  merchant = account.merchant;
+  isAdmin = account.admin === true;
   renderAccount();
   if (merchant?.approved) await fetchMerchantOffers();
 }
+
+submit('admin-refresh', async () => {
+  const current = session;
+  const requests = await api('/api/admin/merchants', { signedIn: true });
+  if (session !== current) return;
+  const container = byId('admin-requests');
+  container.replaceChildren(...requests.map(request => {
+    const card = node('article', undefined, 'card');
+    const approve = button('اعتمد الحساب', async () => {
+      if (session !== current || !window.confirm('هل تحققت من هوية منشأة «' + request.name + '»؟')) return;
+      approve.disabled = true;
+      try {
+        await api('/api/admin/merchants', {
+          signedIn: true, method: 'POST', body: { user_id: request.user_id },
+        });
+        if (session !== current) return;
+        card.remove();
+        status('تم اعتماد حساب المنشأة.');
+      } catch (error) {
+        if (session === current) status(explain(error));
+      } finally {
+        approve.disabled = false;
+      }
+    });
+    card.append(node('h3', request.name), node('p', request.user_id), approve);
+    return card;
+  }));
+  if (requests.length === 0) container.append(node('p', 'ما فيه طلبات بانتظار المراجعة.'));
+});
 
 function resetOfferForm() {
   editingOffer = undefined;
