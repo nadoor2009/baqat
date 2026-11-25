@@ -14,7 +14,7 @@ module.exports = ({ config }) => {
     plugins: [
       ...(config.plugins || []),
       '@react-native-firebase/app',
-      ...(iosReady ? ['@react-native-firebase/auth', ['expo-build-properties', { ios: { useFrameworks: 'static' } }]] : []),
+      ...(iosReady ? ['@react-native-firebase/auth', ['expo-build-properties', { ios: { useFrameworks: 'dynamic' } }]] : []),
     ],
   };
 };
