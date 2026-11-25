@@ -420,6 +420,7 @@ function Mobile() {
         </Card>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
+          <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
           {!token ? <Card>
             <Input label="البريد الإلكتروني" value={credentials.email} keyboardType="email-address" autoCapitalize="none" ltr
               onChangeText={email => setCredentials({ ...credentials, email })} />
