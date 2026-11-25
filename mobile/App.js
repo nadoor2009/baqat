@@ -1,3 +1,4 @@
+import VoucherScanner, { voucherCode } from './VoucherScanner';
 import * as SecureStore from 'expo-secure-store';
 import { phoneAuth, requestPhoneCode, confirmPhoneCode, nativeSession } from './phone';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -98,6 +99,7 @@ function Mobile() {
   const [draft, setDraft] = useState(emptyOffer);
   const [editingOffer, setEditingOffer] = useState(null);
   const [codeInput, setCodeInput] = useState('');
+  const [scanning, setScanning] = useState(false);
   const [vouchers, setVouchers] = useState({});
   const [receipts, setReceipts] = useState(null);
   const [receiptCode, setReceiptCode] = useState(null);
@@ -116,6 +118,8 @@ function Mobile() {
 
   function signOut() {
     token?.close();
+    setScanning(false);
+    setCodeInput('');
     setToken(null);
     setChallenge(null);
     setSms('');
@@ -565,9 +569,17 @@ function Mobile() {
           <Title>لوحة {merchant.name}</Title>
           <Card>
             <Title>استخدام رمز العميل</Title>
+            <Button label="امسح رمز العميل" secondary disabled={busy} onPress={() => setScanning(true)} />
+            {scanning && <VoucherScanner onClose={() => setScanning(false)} onScan={code => {
+              setCodeInput(code);
+              setScanning(false);
+              setNote('تمت قراءة الرمز. اضغط «استخدم الرمز» للتأكيد.');
+            }} />}
             <Input label="رمز الباقة" value={codeInput} autoCapitalize="none" ltr onChangeText={setCodeInput} />
             <Button label="استخدم الرمز" disabled={busy} onPress={() => run(async () => {
-              const [used] = await api('vouchers/redeem', { token, method: 'POST', body: { code: codeInput.trim().toLowerCase() } });
+              const code = voucherCode(codeInput);
+              if (!code) return setNote('أدخل رمز باقات كاملًا أو امسحه بالكاميرا.');
+              const [used] = await api('vouchers/redeem', { token, method: 'POST', body: { code } });
               if (used) setCodeInput('');
               setNote(used ? 'تم استخدام رمز «' + used.offer_name + '».' : 'الرمز غير متاح للاستخدام.');
               scroll.current?.scrollTo({ y: 0, animated: true });
