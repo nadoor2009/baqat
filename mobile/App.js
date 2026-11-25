@@ -1,3 +1,4 @@
+import { phoneAuth, requestPhoneCode, confirmPhoneCode, nativeSession } from './phone';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
@@ -80,6 +81,12 @@ function Mobile() {
   const [selected, setSelected] = useState([]);
   const [offer, setOffer] = useState(null);
   const [token, setToken] = useState(null);
+  const [phone, setPhone] = useState('');
+  const [sms, setSms] = useState('');
+  const [challenge, setChallenge] = useState(null);
+  const [emailMode, setEmailMode] = useState(false);
+  const [linkingPhone, setLinkingPhone] = useState(false);
+  const firebase = phoneAuth();
   const [merchant, setMerchant] = useState(null);
   const [merchantOffers, setMerchantOffers] = useState([]);
   const [credentials, setCredentials] = useState({ email: '', password: '' });
@@ -104,6 +111,9 @@ function Mobile() {
   function signOut() {
     token?.close();
     setToken(null);
+    setChallenge(null);
+    setSms('');
+    setLinkingPhone(false);
     setMerchant(null);
     setMerchantOffers([]);
     cancelEdit();
@@ -198,6 +208,34 @@ function Mobile() {
     const [profile] = await api('merchant', { token: authToken });
     setMerchant(profile || null);
     if (profile?.approved) setMerchantOffers(await api('merchant/offers', { token: authToken }));
+  }
+
+  async function finishPhone(pending, code) {
+    const user = await confirmPhoneCode(firebase, pending, code);
+    const session = nativeSession(firebase, user);
+    await refreshMerchant(session);
+    setToken(session);
+    setChallenge(null);
+    setSms('');
+    setLinkingPhone(false);
+    setCredentials({ email: '', password: '' });
+    setNote(pending.linkUid ? 'تم ربط جوالك بحسابك الحالي.' : 'تم تسجيل الدخول.');
+  }
+
+  function sendPhone() {
+    return run(async () => {
+      if (!firebase) throw new Error('PHONE_UNCONFIGURED');
+      const pending = await requestPhoneCode(firebase, phone, linkingPhone ? {
+        email: credentials.email.trim(), password: credentials.password, uid: token.user.id,
+      } : null);
+      setCredentials({ email: '', password: '' });
+      if (pending.automaticCode) await finishPhone(pending, pending.automaticCode);
+      else {
+        setChallenge(pending);
+        setSms('');
+        setNote('أدخل رمز التحقق المرسل إلى ' + pending.phone);
+      }
+    });
   }
 
   function auth(mode) {
@@ -420,7 +458,29 @@ function Mobile() {
         </Card>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
-          {!token ? <Card>
+          {(!token && firebase && !emailMode || linkingPhone) && <Card>
+            <Title>{linkingPhone ? 'اربط جوالك بحسابك الحالي' : 'الدخول برقم الجوال'}</Title>
+            {!challenge ? <>
+              {linkingPhone && <>
+                <Input label="البريد المسجل" value={credentials.email} autoCapitalize="none" keyboardType="email-address" ltr
+                  onChangeText={email => setCredentials(current => ({ ...current, email }))} />
+                <Input label="كلمة مرور حسابك الحالي" value={credentials.password} secureTextEntry ltr
+                  onChangeText={password => setCredentials(current => ({ ...current, password }))} />
+              </>}
+              <Input label="رقم الجوال السعودي" value={phone} onChangeText={setPhone} keyboardType="phone-pad" ltr placeholder="05XXXXXXXX" />
+              <Copy>بنرسل لك رمز تحقق عبر رسالة نصية. يعالج Firebase رقمك لإتمام التحقق ومنع إساءة الاستخدام.</Copy>
+              <Button label="أرسل رمز التحقق" disabled={busy} onPress={sendPhone} />
+            </> : <>
+              <Input label="رمز التحقق" value={sms} onChangeText={setSms} keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} ltr />
+              <Button label="تحقق" disabled={busy} onPress={() => run(() => finishPhone(challenge, normalize(sms)))} />
+              <Button label="غيّر الرقم أو أعد الطلب" secondary disabled={busy} onPress={() => { setChallenge(null); setSms(''); }} />
+            </>}
+            <Button label={linkingPhone ? 'إلغاء الربط' : 'عندي حساب بالبريد'} secondary disabled={busy} onPress={() => {
+              setChallenge(null); setSms('');
+              if (linkingPhone) setLinkingPhone(false); else setEmailMode(true);
+            }} />
+          </Card>}
+          {!token && (!firebase || emailMode) && <Card>
             <Input label="البريد الإلكتروني" value={credentials.email} keyboardType="email-address" autoCapitalize="none" ltr
               onChangeText={email => setCredentials({ ...credentials, email })} />
             <Input label="كلمة المرور" value={credentials.password} secureTextEntry ltr
@@ -428,10 +488,14 @@ function Mobile() {
             <Button label="دخول" disabled={busy} onPress={() => auth('login')} />
             <Button label="إنشاء حساب" secondary disabled={busy} onPress={() => auth('register')} />
             <Button label="إعادة إرسال تأكيد البريد" secondary disabled={busy} onPress={() => auth('verify')} />
-          </Card> : <>
+            {firebase && <Button label="الدخول بالجوال" secondary disabled={busy} onPress={() => setEmailMode(false)} />}
+          </Card>}
+          {token && !linkingPhone && <>
+            {firebase && !firebase.currentUser?.phoneNumber && <Button label="اربط رقم جوالك بحسابك" secondary disabled={busy}
+              onPress={() => setLinkingPhone(true)} />}
             {!merchant && <Card>
               <Input label="اسم المنشأة" value={merchantName} onChangeText={setMerchantName} />
-              <Button label="اطلب حساب تاجر" disabled={busy} onPress={() => run(async () => {
+              <Button label="أضف منشأتك" disabled={busy} onPress={() => run(async () => {
                 await api('merchant', { token, method: 'POST', body: { name: merchantName } });
                 await refreshMerchant(token);
               })} />
@@ -440,7 +504,7 @@ function Mobile() {
               <Copy>طلب «{merchant.name}» بانتظار المراجعة.</Copy>
               <Button label="تحديث حالة الطلب" secondary disabled={busy} onPress={() => run(() => refreshMerchant(token))} />
             </Card>}
-            {merchant?.approved ? <Button label="لوحة التاجر" onPress={() => navigate('merchant')} /> : null}
+            {merchant?.approved ? <Button label="لوحة منشأتي" onPress={() => navigate('merchant')} /> : null}
             <Button label="تسجيل الخروج" disabled={busy} secondary onPress={() => { signOut(); setNote('تم تسجيل الخروج.'); }} />
           </>}
         </>}

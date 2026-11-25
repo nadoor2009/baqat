@@ -88,3 +88,22 @@ test('merchant approval requires an allowlisted verified account and is idempote
   const account = await (await request('account', applicant)).json();
   assert.deepEqual(account, { merchant: { name: 'Test Merchant', approved: 1 }, admin: false });
 });
+
+test('verified Saudi phone users have account access without admin privileges', async t => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
+  let phoneNumber = '+966500000001';
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    users: [{ localId: 'phone-customer-uid', emailVerified: false, phoneNumber }],
+  }));
+  const env = { FIREBASE_API_KEY: 'test-key', BAQAT_ADMIN_UIDS: 'another-uid',
+    DB: { prepare: sql => ({ bind: (...args) => ({ first: async () => db.prepare(sql).get(...args) }) }) } };
+  const get = path => worker.fetch(new Request('https://baqat.local/api/' + path, {
+    headers: { Authorization: 'Bearer verified-phone-token' },
+  }), env);
+  assert.deepEqual(await (await get('account')).json(), { merchant: null, admin: false });
+  assert.equal((await get('admin/merchants')).status, 403);
+  phoneNumber = undefined;
+  assert.equal((await get('account')).status, 403);
+});

@@ -71,7 +71,9 @@ async function actor(request, env) {
   }
   const user = (await reply.json()).users?.[0];
   if (!user?.localId || user.disabled) throw new ApiError(401, 'AUTH_REQUIRED');
-  if (user.emailVerified !== true) throw new ApiError(403, 'EMAIL_UNVERIFIED');
+  if (user.emailVerified !== true && !/^\+9665\d{8}$/.test(user.phoneNumber || '')) {
+    throw new ApiError(403, 'EMAIL_UNVERIFIED');
+  }
   return user.localId;
 }
 
