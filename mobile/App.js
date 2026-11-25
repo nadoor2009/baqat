@@ -41,12 +41,16 @@ function Copy({ children }) { return <Text style={styles.copy}>{children}</Text>
 
 function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
   return <Card>
-    <Photo meal={offer.meal} />
-    {offer.sample && <Copy>عرض تجريبي</Copy>}
-    <Title>{offer.name}</Title>
-    <Copy>{offer.venue} · {offer.district}</Copy>
-    <Text style={styles.price}>{money(offer.price_halalas)}</Text>
-    <Copy>حتى {offer.people} أشخاص · {meals.find(([id]) => id === offer.meal)?.[1]}</Copy>
+    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={'تفاصيل ' + offer.name} style={styles.offerRow}>
+      <View style={styles.offerText}>
+        {offer.sample && <Text style={styles.sample}>عرض تجريبي</Text>}
+        <Title>{offer.name}</Title>
+        <Copy>{offer.venue} · {offer.district}</Copy>
+        <Text style={styles.price}>{money(offer.price_halalas)}</Text>
+        <Copy>حتى {offer.people} أشخاص</Copy>
+      </View>
+      <Photo meal={offer.meal} style={styles.thumbnail} />
+    </Pressable>
     <View style={styles.row}>
       <Button label="التفاصيل" onPress={onOpen} />
       <Button label={saved ? "♥ محفوظة" : "♡ حفظ"} secondary onPress={onSave} />
@@ -275,27 +279,35 @@ function Mobile() {
   const activeVoucher = voucher && Date.parse(voucher.expires_at) > Date.now();
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="dark-content" />
-    <View style={styles.header}><Text style={styles.logo}>باقات</Text><Text style={styles.city}>الرياض</Text></View>
+    {screen !== 'welcome' && <View style={styles.header}><Text style={styles.logo}>باقات</Text><Text style={styles.city}>⌖ الرياض</Text></View>}
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, screen === 'welcome' && styles.welcomeContent]}>
         {!!note && <Text accessibilityLiveRegion="polite" style={styles.note}>{note}</Text>}
         {busy && <ActivityIndicator accessibilityLabel="جاري التحميل" color="#512477" />}
-        {screen === 'welcome' && <View style={styles.hero}>
-          <Text style={styles.heroTitle}>🎁 باقات</Text>
+        {screen === 'welcome' && <View style={[styles.hero, styles.welcome]}>
+          <Text style={styles.welcomeIcon}>🎁</Text>
+          <Text style={styles.welcomeTitle}>باقات</Text>
           <Text style={styles.heroText}>أفضل الباقات في مكان واحد، بالوقت والمكان اللي تبيه.</Text>
-          <Photo meal="dinner" />
+          <View style={styles.collage}>
+            <Photo meal="lunch" style={[styles.panelPhoto, styles.leftPhoto]} />
+            <Photo meal="dinner" style={styles.panelPhoto} />
+            <Photo meal="both" style={[styles.panelPhoto, styles.rightPhoto]} />
+          </View>
           <Button label="ابدأ الآن" secondary onPress={() => begin('home')} />
           <Button label="لديك حساب؟ سجّل الدخول" onPress={() => begin('account')} />
         </View>}
         {screen === 'home' && <>
           <Title>وش تبي تسوي اليوم؟</Title>
           <CategoryGrid onSelect={selectCategory} />
-          <Card><Photo meal="both" /><Title>باقات اليوم</Title>
-            <Button label="ابحث عن باقات اليوم" onPress={() => {
+          <Pressable accessibilityRole="button" accessibilityLabel="ابحث عن باقات اليوم" style={styles.today}
+            onPress={() => {
               setFilters(current => ({ ...current, day: riyadhDay() }));
               navigate('search');
-            }} />
-          </Card>
+            }}>
+            <View style={styles.offerText}><Text style={styles.todayTitle}>باقات اليوم</Text>
+              <Text style={styles.todayCopy}>استعرض الباقات المتاحة اليوم</Text></View>
+            <Photo meal="both" style={styles.todayPhoto} />
+          </Pressable>
           <Button label="جرّب عروضًا افتراضية" secondary onPress={showPreview} />
         </>}
         {screen === 'category' && <Card>
@@ -509,6 +521,22 @@ const styles = StyleSheet.create({
   ltr: { textAlign: 'left', writingDirection: 'ltr' },
   note: { padding: 12, backgroundColor: '#eee4f5', borderRadius: 10, color: '#44205f', fontSize: 16, textAlign: 'right' },
   code: { textAlign: 'center', writingDirection: 'ltr', fontSize: 16, padding: 12, backgroundColor: '#eee4f5', color: '#44205f', borderRadius: 10 },
+  welcomeContent: { flexGrow: 1, paddingBottom: 16 },
+  welcome: { flexGrow: 1, justifyContent: 'center', gap: 16, backgroundColor: '#39215a' },
+  welcomeTitle: { textAlign: 'center', color: '#fff', fontSize: 44, fontWeight: '900' },
+  welcomeIcon: { textAlign: 'center', color: '#f5eaff', fontSize: 44 },
+  collage: { flexDirection: 'row', gap: 7, paddingHorizontal: 4, marginVertical: 16 },
+  panelPhoto: { flex: 1, width: 0, height: 124, borderWidth: 2, borderColor: '#f5eaff' },
+  leftPhoto: { transform: [{ rotate: '-7deg' }], marginTop: 12 },
+  rightPhoto: { transform: [{ rotate: '7deg' }], marginTop: 12 },
+  offerRow: { flexDirection: 'row-reverse', gap: 12, alignItems: 'center' },
+  offerText: { flex: 1, gap: 4 },
+  thumbnail: { width: 92, height: 104 },
+  sample: { color: '#4f356a', backgroundColor: '#f1e7f8', fontWeight: '700', alignSelf: 'flex-end', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  today: { backgroundColor: '#3b245a', flexDirection: 'row-reverse', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16 },
+  todayTitle: { color: 'white', textAlign: 'right', fontSize: 19, fontWeight: '800' },
+  todayCopy: { color: '#f0e5fa', textAlign: 'right', fontSize: 14 },
+  todayPhoto: { width: 94, height: 76 },
   map: { width: '100%', height: 310, borderRadius: 16 },
   qr: { alignItems: 'center', padding: 14 },
   detailPhoto: { height: 210 },
