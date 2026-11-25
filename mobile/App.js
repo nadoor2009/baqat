@@ -458,6 +458,7 @@ function Mobile() {
         </Card>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
+          <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
           {(!token && firebase && !emailMode || linkingPhone) && <Card>
             <Title>{linkingPhone ? 'اربط جوالك بحسابك الحالي' : 'الدخول برقم الجوال'}</Title>
             {!challenge ? <>
