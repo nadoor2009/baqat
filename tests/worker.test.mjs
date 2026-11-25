@@ -11,6 +11,7 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const prepare = sql => ({
     bind: (...parameters) => ({
       first: async () => sqlite.prepare(sql).get(...parameters),
+      all: async () => ({ results: sqlite.prepare(sql).all(...parameters) }),
     }),
   });
   const owner = 'verified-merchant-account';
@@ -46,17 +47,27 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const attempts = await Promise.all([issue(), issue()]);
   assert.deepEqual(attempts.map(result => result.status).sort(), [201, 409]);
   const [{ code }] = await attempts.find(result => result.status === 201).json();
+  const history = token => worker.fetch(new Request('https://baqat.local/api/vouchers', {
+    headers: { Authorization: 'Bearer ' + token },
+  }), env).then(response => response.json());
+  assert.deepEqual(await history(outsider), []);
+  const [entry] = await history(customer);
+  assert.equal(entry.status, 'active');
+  assert.equal(entry.code, undefined);
+  assert.equal(entry.token_hash, undefined);
   assert.deepEqual(await redeem(code, outsider), []);
   assert.equal((await edit(owner)).status, 409);
   assert.equal(sqlite.prepare('SELECT price_halalas FROM offers WHERE id = ?').get(offer).price_halalas, 11900);
   const redemptions = await Promise.all([redeem(code), redeem(code)]);
   assert.deepEqual(redemptions.map(result => result.length).sort(), [0, 1]);
+  assert.equal((await history(customer))[0].status, 'used');
   assert.equal((await edit(owner)).status, 200);
   assert.equal(sqlite.prepare('SELECT price_halalas, published FROM offers WHERE id = ?').get(offer).price_halalas, 14900);
   assert.equal(sqlite.prepare('SELECT published FROM offers WHERE id = ?').get(offer).published, 1);
   const [{ code: expired }] = await (await issue()).json();
   sqlite.exec("UPDATE vouchers SET expires_at = '2000-01-01T00:00:00.000Z' WHERE redeemed_at IS NULL");
   assert.deepEqual(await redeem(expired), []);
+  assert.ok((await history(customer)).some(entry => entry.status === 'expired'));
 });
 
 test('merchant approval requires an allowlisted verified account and is idempotent', async t => {

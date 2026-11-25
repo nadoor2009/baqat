@@ -172,11 +172,27 @@ async function issue(db, uid, offer) {
         SELECT 1 FROM vouchers WHERE customer_id = ? AND offer_id = o.id
           AND expires_at > ? AND redeemed_at IS NULL
       )
-    RETURNING expires_at
+    RETURNING issued_at, expires_at
   `).bind(await hash(code), uid, iso(now), iso(now + 1800000), offer, uid, iso(now),
     iso(now), uid, iso(now - 3600000), uid, iso(now)).first();
   if (!result) throw new ApiError(409, 'ISSUE_DENIED');
-  return [{ code, expires_at: result.expires_at }];
+  return [{ code, issued_at: result.issued_at, expires_at: result.expires_at }];
+}
+
+async function listVouchers(db, uid) {
+  const now = iso(Date.now());
+  const { results } = await db.prepare(`
+    SELECT v.offer_id, o.name, o.venue, v.issued_at, v.expires_at, v.redeemed_at,
+      CASE WHEN v.redeemed_at IS NOT NULL THEN 'used'
+           WHEN v.expires_at <= ? THEN 'expired'
+           WHEN o.published = 0 OR m.approved = 0 THEN 'unavailable'
+           ELSE 'active' END AS status
+    FROM vouchers v JOIN offers o ON o.id = v.offer_id
+    JOIN merchants m ON m.user_id = o.merchant_id
+    WHERE v.customer_id = ?
+    ORDER BY v.issued_at DESC, v.offer_id LIMIT 50
+  `).bind(now, uid).all();
+  return results;
 }
 
 async function redeem(db, uid, code) {
@@ -271,6 +287,7 @@ export default {
         if (!edited) throw new ApiError(404, 'OFFER_UNAVAILABLE');
         return json(edited);
       }
+      if (method === 'GET' && path === '/api/vouchers') return json(await listVouchers(db, uid));
       if (method === 'POST' && path === '/api/vouchers') return json(await issue(db, uid, (await body(request)).offer), 201);
       if (method === 'POST' && path === '/api/vouchers/redeem') return json(await redeem(db, uid, (await body(request)).code));
       return json({ message: 'NOT_FOUND' }, 404);

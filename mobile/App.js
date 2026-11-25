@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import { phoneAuth, requestPhoneCode, confirmPhoneCode, nativeSession } from './phone';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
@@ -69,6 +70,9 @@ const offerFields = [
 ];
 const emptyOffer = { meal: 'both', north: true };
 
+const voucherLabels = { active: 'ساري', used: 'مستخدم', expired: 'منتهي', unavailable: 'غير متاح' };
+const voucherKey = (uid, offerId) => 'baqat.voucher.' + encodeURIComponent(uid).replace(/%/g, '-') + '.' + offerId;
+
 function Mobile() {
   const [screen, setScreen] = useState('welcome');
   const [filters, setFilters] = useState({ day: riyadhDay(), people: '2', budget: '200', meal: 'both', area: 'north' });
@@ -95,6 +99,8 @@ function Mobile() {
   const [editingOffer, setEditingOffer] = useState(null);
   const [codeInput, setCodeInput] = useState('');
   const [vouchers, setVouchers] = useState({});
+  const [receipts, setReceipts] = useState(null);
+  const [receiptCode, setReceiptCode] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -118,6 +124,8 @@ function Mobile() {
     setMerchantOffers([]);
     cancelEdit();
     setVouchers({});
+    setReceipts(null);
+    setReceiptCode(null);
   }
 
   async function run(action) {
@@ -249,6 +257,26 @@ function Mobile() {
       setToken(authToken);
       setNote('تم تسجيل الدخول.');
     });
+  }
+
+  function openMyVouchers() {
+    navigate('my-vouchers');
+    setReceiptCode(null);
+    setReceipts(null);
+    run(async () => setReceipts(await api('vouchers', { token })));
+  }
+
+  async function showReceipt(receipt) {
+    setReceiptCode(null);
+    const latest = await api('vouchers', { token });
+    setReceipts(latest);
+    const row = latest.find(item => item.offer_id === receipt.offer_id && item.issued_at === receipt.issued_at);
+    if (row?.status !== 'active') return setNote('الرمز لم يعد ساريًا.');
+    const stored = await SecureStore.getItemAsync(voucherKey(token.user.id, row.offer_id));
+    const saved = stored ? JSON.parse(stored) : null;
+    if (saved?.issued_at !== row.issued_at) return setNote('الرمز الصريح موجود فقط على الجهاز اللي أصدره.');
+    setReceiptCode({ ...row, code: saved.code });
+    scroll.current?.scrollTo({ y: 0, animated: true });
   }
 
   function toggleCompare(item) {
@@ -443,6 +471,11 @@ function Mobile() {
               const [issued] = await api('vouchers', { token, method: 'POST', body: { offer: offer.id } });
               setVouchers(current => ({ ...current, [offer.id]: issued }));
               navigate('voucher');
+              try {
+                await SecureStore.setItemAsync(voucherKey(token.user.id, offer.id), JSON.stringify(issued));
+              } catch {
+                setNote('ظهر الرمز، لكن تعذّر حفظه على الجهاز.');
+              }
             }) : navigate('account')} />}
         </Card>}
         {screen === 'voucher' && offer && <Card>
@@ -456,6 +489,24 @@ function Mobile() {
             </> : <Copy>الرمز غير متاح أو انتهت صلاحيته.</Copy>}
           <Button label="العودة للتفاصيل" secondary onPress={() => navigate('detail')} />
         </Card>}
+        {screen === 'my-vouchers' && token && <>
+          <Title>رموزي</Title>
+          <Button label="تحديث الحالات" secondary disabled={busy} onPress={openMyVouchers} />
+          {receiptCode && <Card>
+            <Title>{receiptCode.name}</Title>
+            <View style={styles.qr}><QRCode value={receiptCode.code} size={188} /></View>
+            <Text selectable style={styles.code}>{receiptCode.code}</Text>
+            <Copy>ينتهي في {riyadhTime(receiptCode.expires_at)}</Copy>
+          </Card>}
+          {receipts?.length === 0 && <Copy>ما أصدرت أي رمز إلى الآن.</Copy>}
+          {receipts?.map(item => <Card key={item.offer_id + item.issued_at}>
+            <Title>{item.name}</Title>
+            <Copy>{item.venue} · {voucherLabels[item.status]}</Copy>
+            <Copy>{riyadhTime(item.redeemed_at || item.expires_at)}</Copy>
+            {item.status === 'active' && <Button label="اعرض الرمز" disabled={busy}
+              onPress={() => run(() => showReceipt(item))} />}
+          </Card>)}
+        </>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
           <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
@@ -492,6 +543,7 @@ function Mobile() {
             {firebase && <Button label="الدخول بالجوال" secondary disabled={busy} onPress={() => setEmailMode(false)} />}
           </Card>}
           {token && !linkingPhone && <>
+            <Button label="رموزي" disabled={busy} onPress={openMyVouchers} />
             {firebase && !firebase.currentUser?.phoneNumber && <Button label="اربط رقم جوالك بحسابك" secondary disabled={busy}
               onPress={() => setLinkingPhone(true)} />}
             {!merchant && <Card>
