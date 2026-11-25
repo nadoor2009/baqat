@@ -2,3 +2,5 @@ node_modules/
 .expo/
 android/
 ios/
+GoogleService-Info.plist
+google-services.json

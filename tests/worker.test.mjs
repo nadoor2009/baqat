@@ -8,9 +8,11 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
   sqlite.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_offer_image.sql', import.meta.url), 'utf8'));
   const prepare = sql => ({
     bind: (...parameters) => ({
       first: async () => sqlite.prepare(sql).get(...parameters),
+      all: async () => ({ results: sqlite.prepare(sql).all(...parameters) }),
     }),
   });
   const owner = 'verified-merchant-account';
@@ -25,7 +27,7 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const offer = crypto.randomUUID();
   sqlite.prepare(`INSERT INTO offers VALUES
     (?, ?, 'Dinner', 'Venue', 'Hittin', 'Address', 1, 24.75, 46.65,
-    11900, 2, 'dinner', 'Dinner for two', ?, ?, 1)`)
+    11900, 2, 'dinner', 'Dinner for two', ?, ?, 1, NULL)`)
     .run(offer, owner, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString());
   const env = { DB: { prepare }, FIREBASE_API_KEY: 'test-key' };
   const post = (path, token, body, method = 'POST') => worker.fetch(new Request('https://baqat.local/api/' + path, {
@@ -33,7 +35,8 @@ test('voucher issues once and can be used once only by the owner before expiry',
     headers: { Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
   }), env);
-  const edit = token => post('merchant/offers/' + offer, token, {
+  const edit = (token, image = {}) => post('merchant/offers/' + offer, token, {
+    ...image,
     name: 'Updated dinner', venue: 'Venue', district: 'Hittin', address: 'Address',
     north: true, latitude: 24.75, longitude: 46.65, price_halalas: 14900,
     people: 2, meal: 'dinner', inclusions: 'Dinner for two',
@@ -46,17 +49,30 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const attempts = await Promise.all([issue(), issue()]);
   assert.deepEqual(attempts.map(result => result.status).sort(), [201, 409]);
   const [{ code }] = await attempts.find(result => result.status === 201).json();
+  const history = token => worker.fetch(new Request('https://baqat.local/api/vouchers', {
+    headers: { Authorization: 'Bearer ' + token },
+  }), env).then(response => response.json());
+  assert.deepEqual(await history(outsider), []);
+  const [entry] = await history(customer);
+  assert.equal(entry.status, 'active');
+  assert.equal(entry.code, undefined);
+  assert.equal(entry.token_hash, undefined);
   assert.deepEqual(await redeem(code, outsider), []);
   assert.equal((await edit(owner)).status, 409);
   assert.equal(sqlite.prepare('SELECT price_halalas FROM offers WHERE id = ?').get(offer).price_halalas, 11900);
   const redemptions = await Promise.all([redeem(code), redeem(code)]);
   assert.deepEqual(redemptions.map(result => result.length).sort(), [0, 1]);
+  assert.equal((await history(customer))[0].status, 'used');
+  assert.equal((await edit(owner, { image_url: 'http://example.test/image.jpg' })).status, 400);
+  assert.equal((await edit(owner, { image_url: 'https://example.test/image.jpg' })).status, 200);
   assert.equal((await edit(owner)).status, 200);
+  assert.equal(sqlite.prepare('SELECT image_url FROM offers WHERE id = ?').get(offer).image_url, 'https://example.test/image.jpg');
   assert.equal(sqlite.prepare('SELECT price_halalas, published FROM offers WHERE id = ?').get(offer).price_halalas, 14900);
   assert.equal(sqlite.prepare('SELECT published FROM offers WHERE id = ?').get(offer).published, 1);
   const [{ code: expired }] = await (await issue()).json();
   sqlite.exec("UPDATE vouchers SET expires_at = '2000-01-01T00:00:00.000Z' WHERE redeemed_at IS NULL");
   assert.deepEqual(await redeem(expired), []);
+  assert.ok((await history(customer)).some(entry => entry.status === 'expired'));
 });
 
 test('merchant approval requires an allowlisted verified account and is idempotent', async t => {
@@ -87,4 +103,23 @@ test('merchant approval requires an allowlisted verified account and is idempote
   assert.equal((await request('admin/merchants', admin, { user_id: applicant })).status, 409);
   const account = await (await request('account', applicant)).json();
   assert.deepEqual(account, { merchant: { name: 'Test Merchant', approved: 1 }, admin: false });
+});
+
+test('verified Saudi phone users have account access without admin privileges', async t => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
+  let phoneNumber = '+966500000001';
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    users: [{ localId: 'phone-customer-uid', emailVerified: false, phoneNumber }],
+  }));
+  const env = { FIREBASE_API_KEY: 'test-key', BAQAT_ADMIN_UIDS: 'another-uid',
+    DB: { prepare: sql => ({ bind: (...args) => ({ first: async () => db.prepare(sql).get(...args) }) }) } };
+  const get = path => worker.fetch(new Request('https://baqat.local/api/' + path, {
+    headers: { Authorization: 'Bearer verified-phone-token' },
+  }), env);
+  assert.deepEqual(await (await get('account')).json(), { merchant: null, admin: false });
+  assert.equal((await get('admin/merchants')).status, 403);
+  phoneNumber = undefined;
+  assert.equal((await get('account')).status, 403);
 });

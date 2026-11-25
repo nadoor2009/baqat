@@ -28,8 +28,11 @@ export function sampleOffers(day) {
   }));
 }
 
-export function Photo({ meal, style }) {
-  return <Image accessibilityIgnoresInvertColors source={{ uri: illustrations[meal] || illustrations.both }}
+export function Photo({ meal, style, uri }) {
+  const [failed, setFailed] = React.useState(null);
+  const fallback = illustrations[meal] || illustrations.both;
+  return <Image accessibilityIgnoresInvertColors source={{ uri: uri && failed !== uri ? uri : fallback }}
+    onError={() => { if (uri) setFailed(uri); }}
     resizeMode="cover" style={[styles.photo, style]} />;
 }
 

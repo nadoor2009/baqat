@@ -1,3 +1,6 @@
+import VoucherScanner, { voucherCode } from './VoucherScanner';
+import * as SecureStore from 'expo-secure-store';
+import { phoneAuth, requestPhoneCode, confirmPhoneCode, nativeSession } from './phone';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
 import QRCode from 'react-native-qrcode-svg';
@@ -49,7 +52,7 @@ function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
         <Text style={styles.price}>{money(offer.price_halalas)}</Text>
         <Copy>حتى {offer.people} أشخاص</Copy>
       </View>
-      <Photo meal={offer.meal} style={styles.thumbnail} />
+      <Photo uri={offer.image_url} meal={offer.meal} style={styles.thumbnail} />
     </Pressable>
     <View style={styles.row}>
       <Button label="التفاصيل" onPress={onOpen} />
@@ -63,10 +66,14 @@ const offerFields = [
   ['name', 'اسم الباقة'], ['venue', 'اسم الفرع'], ['district', 'الحي'], ['address', 'العنوان'],
   ['latitude', 'خط العرض', true], ['longitude', 'خط الطول', true], ['price', 'السعر النهائي بالريال', true],
   ['people', 'عدد الأشخاص', true], ['inclusions', 'مكونات الباقة'],
+  ['image_url', 'رابط صورة الباقة (اختياري)', false, 'https://', 'url'],
   ['starts_at', 'البداية بتوقيت الرياض', false, '2026-12-01 12:00'],
   ['ends_at', 'النهاية بتوقيت الرياض', false, '2026-12-01 22:00'],
 ];
 const emptyOffer = { meal: 'both', north: true };
+
+const voucherLabels = { active: 'ساري', used: 'مستخدم', expired: 'منتهي', unavailable: 'غير متاح' };
+const voucherKey = (uid, offerId) => 'baqat.voucher.' + encodeURIComponent(uid).replace(/%/g, '-') + '.' + offerId;
 
 function Mobile() {
   const [screen, setScreen] = useState('welcome');
@@ -80,6 +87,12 @@ function Mobile() {
   const [selected, setSelected] = useState([]);
   const [offer, setOffer] = useState(null);
   const [token, setToken] = useState(null);
+  const [phone, setPhone] = useState('');
+  const [sms, setSms] = useState('');
+  const [challenge, setChallenge] = useState(null);
+  const [emailMode, setEmailMode] = useState(false);
+  const [linkingPhone, setLinkingPhone] = useState(false);
+  const firebase = phoneAuth();
   const [merchant, setMerchant] = useState(null);
   const [merchantOffers, setMerchantOffers] = useState([]);
   const [credentials, setCredentials] = useState({ email: '', password: '' });
@@ -87,7 +100,10 @@ function Mobile() {
   const [draft, setDraft] = useState(emptyOffer);
   const [editingOffer, setEditingOffer] = useState(null);
   const [codeInput, setCodeInput] = useState('');
+  const [scanning, setScanning] = useState(false);
   const [vouchers, setVouchers] = useState({});
+  const [receipts, setReceipts] = useState(null);
+  const [receiptCode, setReceiptCode] = useState(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -103,11 +119,18 @@ function Mobile() {
 
   function signOut() {
     token?.close();
+    setScanning(false);
+    setCodeInput('');
     setToken(null);
+    setChallenge(null);
+    setSms('');
+    setLinkingPhone(false);
     setMerchant(null);
     setMerchantOffers([]);
     cancelEdit();
     setVouchers({});
+    setReceipts(null);
+    setReceiptCode(null);
   }
 
   async function run(action) {
@@ -200,6 +223,34 @@ function Mobile() {
     if (profile?.approved) setMerchantOffers(await api('merchant/offers', { token: authToken }));
   }
 
+  async function finishPhone(pending, code) {
+    const user = await confirmPhoneCode(firebase, pending, code);
+    const session = nativeSession(firebase, user);
+    await refreshMerchant(session);
+    setToken(session);
+    setChallenge(null);
+    setSms('');
+    setLinkingPhone(false);
+    setCredentials({ email: '', password: '' });
+    setNote(pending.linkUid ? 'تم ربط جوالك بحسابك الحالي.' : 'تم تسجيل الدخول.');
+  }
+
+  function sendPhone() {
+    return run(async () => {
+      if (!firebase) throw new Error('PHONE_UNCONFIGURED');
+      const pending = await requestPhoneCode(firebase, phone, linkingPhone ? {
+        email: credentials.email.trim(), password: credentials.password, uid: token.user.id,
+      } : null);
+      setCredentials({ email: '', password: '' });
+      if (pending.automaticCode) await finishPhone(pending, pending.automaticCode);
+      else {
+        setChallenge(pending);
+        setSms('');
+        setNote('أدخل رمز التحقق المرسل إلى ' + pending.phone);
+      }
+    });
+  }
+
   function auth(mode) {
     return run(async () => {
       const email = credentials.email.trim();
@@ -211,6 +262,26 @@ function Mobile() {
       setToken(authToken);
       setNote('تم تسجيل الدخول.');
     });
+  }
+
+  function openMyVouchers() {
+    navigate('my-vouchers');
+    setReceiptCode(null);
+    setReceipts(null);
+    run(async () => setReceipts(await api('vouchers', { token })));
+  }
+
+  async function showReceipt(receipt) {
+    setReceiptCode(null);
+    const latest = await api('vouchers', { token });
+    setReceipts(latest);
+    const row = latest.find(item => item.offer_id === receipt.offer_id && item.issued_at === receipt.issued_at);
+    if (row?.status !== 'active') return setNote('الرمز لم يعد ساريًا.');
+    const stored = await SecureStore.getItemAsync(voucherKey(token.user.id, row.offer_id));
+    const saved = stored ? JSON.parse(stored) : null;
+    if (saved?.issued_at !== row.issued_at) return setNote('الرمز الصريح موجود فقط على الجهاز اللي أصدره.');
+    setReceiptCode({ ...row, code: saved.code });
+    scroll.current?.scrollTo({ y: 0, animated: true });
   }
 
   function toggleCompare(item) {
@@ -254,6 +325,7 @@ function Mobile() {
       const path = 'merchant/offers' + (editingOffer ? '/' + editingOffer : '');
       await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
         ...draft,
+        image_url: draft.image_url?.trim() || null,
         latitude: Number(normalize(draft.latitude || '')),
         longitude: Number(normalize(draft.longitude || '')),
         people: Number(normalize(draft.people || '')),
@@ -379,7 +451,7 @@ function Mobile() {
         {screen === 'compare' && <>
           <Title>مقارنة الباقات</Title>
           {selected.map(item => <Card key={item.id}>
-            <Photo meal={item.meal} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
+            <Photo uri={item.image_url} meal={item.meal} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
             <Copy>{item.venue} · {item.district} · حتى {item.people} أشخاص</Copy>
             <Copy>{item.inclusions}</Copy><Copy>{riyadhTime(item.starts_at)} إلى {riyadhTime(item.ends_at)}</Copy>
             <Button label="عرض التفاصيل" onPress={() => { setOffer(item); navigate('detail'); }} />
@@ -387,7 +459,7 @@ function Mobile() {
           <Button label="العودة إلى الباقات" secondary onPress={() => navigate('results')} />
         </>}
         {screen === 'detail' && offer && <Card>
-          <Photo meal={offer.meal} style={styles.detailPhoto} />
+          <Photo uri={offer.image_url} meal={offer.meal} style={styles.detailPhoto} />
           {offer.sample && <Copy>عرض تجريبي · الصور توضيحية</Copy>}
           <Title>{offer.name}</Title><Text style={styles.price}>{money(offer.price_halalas)}</Text>
           <Copy>{offer.venue} · {offer.district} · حتى {offer.people} أشخاص</Copy>
@@ -405,6 +477,11 @@ function Mobile() {
               const [issued] = await api('vouchers', { token, method: 'POST', body: { offer: offer.id } });
               setVouchers(current => ({ ...current, [offer.id]: issued }));
               navigate('voucher');
+              try {
+                await SecureStore.setItemAsync(voucherKey(token.user.id, offer.id), JSON.stringify(issued));
+              } catch {
+                setNote('ظهر الرمز، لكن تعذّر حفظه على الجهاز.');
+              }
             }) : navigate('account')} />}
         </Card>}
         {screen === 'voucher' && offer && <Card>
@@ -418,10 +495,50 @@ function Mobile() {
             </> : <Copy>الرمز غير متاح أو انتهت صلاحيته.</Copy>}
           <Button label="العودة للتفاصيل" secondary onPress={() => navigate('detail')} />
         </Card>}
+        {screen === 'my-vouchers' && token && <>
+          <Title>رموزي</Title>
+          <Button label="تحديث الحالات" secondary disabled={busy} onPress={openMyVouchers} />
+          {receiptCode && <Card>
+            <Title>{receiptCode.name}</Title>
+            <View style={styles.qr}><QRCode value={receiptCode.code} size={188} /></View>
+            <Text selectable style={styles.code}>{receiptCode.code}</Text>
+            <Copy>ينتهي في {riyadhTime(receiptCode.expires_at)}</Copy>
+          </Card>}
+          {receipts?.length === 0 && <Copy>ما أصدرت أي رمز إلى الآن.</Copy>}
+          {receipts?.map(item => <Card key={item.offer_id + item.issued_at}>
+            <Title>{item.name}</Title>
+            <Copy>{item.venue} · {voucherLabels[item.status]}</Copy>
+            <Copy>{riyadhTime(item.redeemed_at || item.expires_at)}</Copy>
+            {item.status === 'active' && <Button label="اعرض الرمز" disabled={busy}
+              onPress={() => run(() => showReceipt(item))} />}
+          </Card>)}
+        </>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
           <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
-          {!token ? <Card>
+          {(!token && firebase && !emailMode || linkingPhone) && <Card>
+            <Title>{linkingPhone ? 'اربط جوالك بحسابك الحالي' : 'الدخول برقم الجوال'}</Title>
+            {!challenge ? <>
+              {linkingPhone && <>
+                <Input label="البريد المسجل" value={credentials.email} autoCapitalize="none" keyboardType="email-address" ltr
+                  onChangeText={email => setCredentials(current => ({ ...current, email }))} />
+                <Input label="كلمة مرور حسابك الحالي" value={credentials.password} secureTextEntry ltr
+                  onChangeText={password => setCredentials(current => ({ ...current, password }))} />
+              </>}
+              <Input label="رقم الجوال السعودي" value={phone} onChangeText={setPhone} keyboardType="phone-pad" ltr placeholder="05XXXXXXXX" />
+              <Copy>بنرسل لك رمز تحقق عبر رسالة نصية. يعالج Firebase رقمك لإتمام التحقق ومنع إساءة الاستخدام.</Copy>
+              <Button label="أرسل رمز التحقق" disabled={busy} onPress={sendPhone} />
+            </> : <>
+              <Input label="رمز التحقق" value={sms} onChangeText={setSms} keyboardType="number-pad" textContentType="oneTimeCode" maxLength={6} ltr />
+              <Button label="تحقق" disabled={busy} onPress={() => run(() => finishPhone(challenge, normalize(sms)))} />
+              <Button label="غيّر الرقم أو أعد الطلب" secondary disabled={busy} onPress={() => { setChallenge(null); setSms(''); }} />
+            </>}
+            <Button label={linkingPhone ? 'إلغاء الربط' : 'عندي حساب بالبريد'} secondary disabled={busy} onPress={() => {
+              setChallenge(null); setSms('');
+              if (linkingPhone) setLinkingPhone(false); else setEmailMode(true);
+            }} />
+          </Card>}
+          {!token && (!firebase || emailMode) && <Card>
             <Input label="البريد الإلكتروني" value={credentials.email} keyboardType="email-address" autoCapitalize="none" ltr
               onChangeText={email => setCredentials({ ...credentials, email })} />
             <Input label="كلمة المرور" value={credentials.password} secureTextEntry ltr
@@ -429,10 +546,15 @@ function Mobile() {
             <Button label="دخول" disabled={busy} onPress={() => auth('login')} />
             <Button label="إنشاء حساب" secondary disabled={busy} onPress={() => auth('register')} />
             <Button label="إعادة إرسال تأكيد البريد" secondary disabled={busy} onPress={() => auth('verify')} />
-          </Card> : <>
+            {firebase && <Button label="الدخول بالجوال" secondary disabled={busy} onPress={() => setEmailMode(false)} />}
+          </Card>}
+          {token && !linkingPhone && <>
+            <Button label="رموزي" disabled={busy} onPress={openMyVouchers} />
+            {firebase && !firebase.currentUser?.phoneNumber && <Button label="اربط رقم جوالك بحسابك" secondary disabled={busy}
+              onPress={() => setLinkingPhone(true)} />}
             {!merchant && <Card>
               <Input label="اسم المنشأة" value={merchantName} onChangeText={setMerchantName} />
-              <Button label="اطلب حساب تاجر" disabled={busy} onPress={() => run(async () => {
+              <Button label="أضف منشأتك" disabled={busy} onPress={() => run(async () => {
                 await api('merchant', { token, method: 'POST', body: { name: merchantName } });
                 await refreshMerchant(token);
               })} />
@@ -441,7 +563,7 @@ function Mobile() {
               <Copy>طلب «{merchant.name}» بانتظار المراجعة.</Copy>
               <Button label="تحديث حالة الطلب" secondary disabled={busy} onPress={() => run(() => refreshMerchant(token))} />
             </Card>}
-            {merchant?.approved ? <Button label="لوحة التاجر" onPress={() => navigate('merchant')} /> : null}
+            {merchant?.approved ? <Button label="لوحة منشأتي" onPress={() => navigate('merchant')} /> : null}
             <Button label="تسجيل الخروج" disabled={busy} secondary onPress={() => { signOut(); setNote('تم تسجيل الخروج.'); }} />
           </>}
         </>}
@@ -449,9 +571,17 @@ function Mobile() {
           <Title>لوحة {merchant.name}</Title>
           <Card>
             <Title>استخدام رمز العميل</Title>
+            <Button label="امسح رمز العميل" secondary disabled={busy} onPress={() => setScanning(true)} />
+            {scanning && <VoucherScanner onClose={() => setScanning(false)} onScan={code => {
+              setCodeInput(code);
+              setScanning(false);
+              setNote('تمت قراءة الرمز. اضغط «استخدم الرمز» للتأكيد.');
+            }} />}
             <Input label="رمز الباقة" value={codeInput} autoCapitalize="none" ltr onChangeText={setCodeInput} />
             <Button label="استخدم الرمز" disabled={busy} onPress={() => run(async () => {
-              const [used] = await api('vouchers/redeem', { token, method: 'POST', body: { code: codeInput.trim().toLowerCase() } });
+              const code = voucherCode(codeInput);
+              if (!code) return setNote('أدخل رمز باقات كاملًا أو امسحه بالكاميرا.');
+              const [used] = await api('vouchers/redeem', { token, method: 'POST', body: { code } });
               if (used) setCodeInput('');
               setNote(used ? 'تم استخدام رمز «' + used.offer_name + '».' : 'الرمز غير متاح للاستخدام.');
               scroll.current?.scrollTo({ y: 0, animated: true });
@@ -464,8 +594,8 @@ function Mobile() {
           </Card>)}
           <Card>
             <Title>{editingOffer ? 'تعديل الباقة' : 'أضف باقة'}</Title>
-            {offerFields.map(([key, label, numeric, placeholder]) => <Input key={key} label={label}
-              value={draft[key] || ''} keyboardType={numeric ? 'decimal-pad' : 'default'}
+            {offerFields.map(([key, label, numeric, placeholder, keyboard]) => <Input key={key} label={label}
+              value={draft[key] || ''} keyboardType={keyboard || (numeric ? 'decimal-pad' : 'default')}
               placeholder={placeholder} ltr={numeric || !!placeholder}
               onChangeText={value => setDraft(current => ({ ...current, [key]: value }))} />)}
             <Choices options={meals} value={draft.meal} change={meal => setDraft({ ...draft, meal })} />

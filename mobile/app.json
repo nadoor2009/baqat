@@ -19,6 +19,17 @@
         "projectId": "dd06d12f-ab00-45a8-be3a-67bc987b9400"
       }
     },
-    "owner": "nader-fahad"
+    "owner": "nader-fahad",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "تستخدم باقات الكاميرا لقراءة رمز الباقة لدى المطعم.",
+          "recordAudioAndroid": false,
+          "microphonePermission": false,
+          "barcodeScannerEnabled": true
+        }
+      ]
+    ]
   }
 }

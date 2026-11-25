@@ -42,6 +42,15 @@ export async function authenticate(mode, email, password) {
 
 export function errorMessage(error) {
   const messages = {
+    INVALID_PHONE: 'أدخل رقم جوال سعودي صحيح.',
+    INVALID_CODE: 'أدخل رمز التحقق المكون من ٦ أرقام.',
+    ACCOUNT_MISMATCH: 'أدخل بيانات البريد المؤكد لنفس حسابك الحالي.',
+    PHONE_UNCONFIGURED: 'التحقق بالجوال غير مهيأ في هذه النسخة.',
+    'auth/invalid-verification-code': 'رمز التحقق غير صحيح.',
+    'auth/session-expired': 'انتهت صلاحية الرمز. أرسل رمزًا جديدًا.',
+    'auth/too-many-requests': 'طلبات كثيرة. حاول لاحقًا.',
+    'auth/credential-already-in-use': 'رقم الجوال مرتبط بحساب آخر.',
+    'auth/operation-not-allowed': 'الدخول بالجوال غير مفعّل في Firebase.',
     INVALID_LOGIN_CREDENTIALS: 'تأكد من البريد الإلكتروني وكلمة المرور.',
     EMAIL_EXISTS: 'هذا البريد مسجل بالفعل. جرّب تسجيل الدخول.',
     EMAIL_UNVERIFIED: 'أكّد بريدك الإلكتروني أولًا. تقدر تعيد إرسال رسالة التأكيد.',
@@ -51,10 +60,11 @@ export function errorMessage(error) {
     ACTIVE_VOUCHERS: 'ما تقدر تعدّل الباقة وفيها رموز سارية. جرّب بعد استخدامها أو انتهاء صلاحيتها.',
     ISSUE_DENIED: 'تعذّر إصدار الرمز. قد تكون الباقة غير متاحة الآن أو عندك رمز ساري لها.',
     OFFER_UNAVAILABLE: 'الباقة غير متاحة.',
+    INVALID_IMAGE_URL: 'رابط الصورة لازم يبدأ بـ HTTPS ويكون رابطًا مباشرًا للصورة.',
     INVALID_INPUT: 'راجع البيانات المدخلة وحاول مرة أخرى.',
     MERCHANT_REQUIRED: 'تحتاج حساب تاجر معتمد لإضافة باقة.',
   };
-  return messages[error.message] || 'تعذّر إكمال العملية. حاول مرة أخرى.';
+  return messages[error.code] || messages[error.message] || 'تعذّر إكمال العملية. حاول مرة أخرى.';
 }
 
 export function riyadhDay() {
