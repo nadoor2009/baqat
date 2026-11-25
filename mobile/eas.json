@@ -6,7 +6,11 @@
         "buildType": "apk"
       }
     },
-    "production": {}
+    "production": {
+      "ios": {
+        "autoIncrement": true
+      }
+    }
   },
   "submit": {
     "production": {
@@ -14,5 +18,8 @@
         "ascAppId": "6838636363"
       }
     }
+  },
+  "cli": {
+    "appVersionSource": "remote"
   }
 }
