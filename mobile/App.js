@@ -52,7 +52,7 @@ function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
         <Text style={styles.price}>{money(offer.price_halalas)}</Text>
         <Copy>حتى {offer.people} أشخاص</Copy>
       </View>
-      <Photo meal={offer.meal} style={styles.thumbnail} />
+      <Photo uri={offer.image_url} meal={offer.meal} style={styles.thumbnail} />
     </Pressable>
     <View style={styles.row}>
       <Button label="التفاصيل" onPress={onOpen} />
@@ -66,6 +66,7 @@ const offerFields = [
   ['name', 'اسم الباقة'], ['venue', 'اسم الفرع'], ['district', 'الحي'], ['address', 'العنوان'],
   ['latitude', 'خط العرض', true], ['longitude', 'خط الطول', true], ['price', 'السعر النهائي بالريال', true],
   ['people', 'عدد الأشخاص', true], ['inclusions', 'مكونات الباقة'],
+  ['image_url', 'رابط صورة الباقة (اختياري)', false, 'https://', 'url'],
   ['starts_at', 'البداية بتوقيت الرياض', false, '2026-12-01 12:00'],
   ['ends_at', 'النهاية بتوقيت الرياض', false, '2026-12-01 22:00'],
 ];
@@ -324,6 +325,7 @@ function Mobile() {
       const path = 'merchant/offers' + (editingOffer ? '/' + editingOffer : '');
       await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
         ...draft,
+        image_url: draft.image_url?.trim() || null,
         latitude: Number(normalize(draft.latitude || '')),
         longitude: Number(normalize(draft.longitude || '')),
         people: Number(normalize(draft.people || '')),
@@ -449,7 +451,7 @@ function Mobile() {
         {screen === 'compare' && <>
           <Title>مقارنة الباقات</Title>
           {selected.map(item => <Card key={item.id}>
-            <Photo meal={item.meal} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
+            <Photo uri={item.image_url} meal={item.meal} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
             <Copy>{item.venue} · {item.district} · حتى {item.people} أشخاص</Copy>
             <Copy>{item.inclusions}</Copy><Copy>{riyadhTime(item.starts_at)} إلى {riyadhTime(item.ends_at)}</Copy>
             <Button label="عرض التفاصيل" onPress={() => { setOffer(item); navigate('detail'); }} />
@@ -457,7 +459,7 @@ function Mobile() {
           <Button label="العودة إلى الباقات" secondary onPress={() => navigate('results')} />
         </>}
         {screen === 'detail' && offer && <Card>
-          <Photo meal={offer.meal} style={styles.detailPhoto} />
+          <Photo uri={offer.image_url} meal={offer.meal} style={styles.detailPhoto} />
           {offer.sample && <Copy>عرض تجريبي · الصور توضيحية</Copy>}
           <Title>{offer.name}</Title><Text style={styles.price}>{money(offer.price_halalas)}</Text>
           <Copy>{offer.venue} · {offer.district} · حتى {offer.people} أشخاص</Copy>
@@ -592,8 +594,8 @@ function Mobile() {
           </Card>)}
           <Card>
             <Title>{editingOffer ? 'تعديل الباقة' : 'أضف باقة'}</Title>
-            {offerFields.map(([key, label, numeric, placeholder]) => <Input key={key} label={label}
-              value={draft[key] || ''} keyboardType={numeric ? 'decimal-pad' : 'default'}
+            {offerFields.map(([key, label, numeric, placeholder, keyboard]) => <Input key={key} label={label}
+              value={draft[key] || ''} keyboardType={keyboard || (numeric ? 'decimal-pad' : 'default')}
               placeholder={placeholder} ltr={numeric || !!placeholder}
               onChangeText={value => setDraft(current => ({ ...current, [key]: value }))} />)}
             <Choices options={meals} value={draft.meal} change={meal => setDraft({ ...draft, meal })} />

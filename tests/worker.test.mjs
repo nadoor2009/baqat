@@ -8,6 +8,7 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
   sqlite.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_offer_image.sql', import.meta.url), 'utf8'));
   const prepare = sql => ({
     bind: (...parameters) => ({
       first: async () => sqlite.prepare(sql).get(...parameters),
@@ -26,7 +27,7 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const offer = crypto.randomUUID();
   sqlite.prepare(`INSERT INTO offers VALUES
     (?, ?, 'Dinner', 'Venue', 'Hittin', 'Address', 1, 24.75, 46.65,
-    11900, 2, 'dinner', 'Dinner for two', ?, ?, 1)`)
+    11900, 2, 'dinner', 'Dinner for two', ?, ?, 1, NULL)`)
     .run(offer, owner, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString());
   const env = { DB: { prepare }, FIREBASE_API_KEY: 'test-key' };
   const post = (path, token, body, method = 'POST') => worker.fetch(new Request('https://baqat.local/api/' + path, {
@@ -34,7 +35,8 @@ test('voucher issues once and can be used once only by the owner before expiry',
     headers: { Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
   }), env);
-  const edit = token => post('merchant/offers/' + offer, token, {
+  const edit = (token, image = {}) => post('merchant/offers/' + offer, token, {
+    ...image,
     name: 'Updated dinner', venue: 'Venue', district: 'Hittin', address: 'Address',
     north: true, latitude: 24.75, longitude: 46.65, price_halalas: 14900,
     people: 2, meal: 'dinner', inclusions: 'Dinner for two',
@@ -61,7 +63,10 @@ test('voucher issues once and can be used once only by the owner before expiry',
   const redemptions = await Promise.all([redeem(code), redeem(code)]);
   assert.deepEqual(redemptions.map(result => result.length).sort(), [0, 1]);
   assert.equal((await history(customer))[0].status, 'used');
+  assert.equal((await edit(owner, { image_url: 'http://example.test/image.jpg' })).status, 400);
+  assert.equal((await edit(owner, { image_url: 'https://example.test/image.jpg' })).status, 200);
   assert.equal((await edit(owner)).status, 200);
+  assert.equal(sqlite.prepare('SELECT image_url FROM offers WHERE id = ?').get(offer).image_url, 'https://example.test/image.jpg');
   assert.equal(sqlite.prepare('SELECT price_halalas, published FROM offers WHERE id = ?').get(offer).price_halalas, 14900);
   assert.equal(sqlite.prepare('SELECT published FROM offers WHERE id = ?').get(offer).published, 1);
   const [{ code: expired }] = await (await issue()).json();

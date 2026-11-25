@@ -86,7 +86,7 @@ async function search(params, db) {
   requireValid(Number.isFinite(start) && meals.has(meal) && ['all', 'north'].includes(area));
   const { results } = await db.prepare(`
     SELECT o.id, o.name, o.venue, o.district, o.address, o.latitude, o.longitude,
-           o.price_halalas, o.people, o.meal, o.inclusions, o.starts_at, o.ends_at
+           o.price_halalas, o.people, o.meal, o.inclusions, o.image_url, o.starts_at, o.ends_at
     FROM offers o JOIN merchants m ON m.user_id = o.merchant_id
     WHERE o.published = 1 AND m.approved = 1 AND o.starts_at < ? AND o.ends_at > ?
       AND o.price_halalas <= ? AND o.people >= ?
@@ -112,17 +112,28 @@ function offerValues(input) {
   ];
 }
 
+function offerImage(value) {
+  if (value == null || value === '') return null;
+  const text = string(value, 8, 2048);
+  let url;
+  try { url = new URL(text); } catch { throw new ApiError(400, 'INVALID_IMAGE_URL'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
+    throw new ApiError(400, 'INVALID_IMAGE_URL');
+  }
+  return url.href;
+}
+
 async function createOffer(db, uid, input) {
   const result = await db.prepare(`
     INSERT INTO offers (
       id, merchant_id, name, venue, district, address, north, latitude, longitude,
-      price_halalas, people, meal, inclusions, starts_at, ends_at
+      price_halalas, people, meal, inclusions, starts_at, ends_at, image_url
     )
-    SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     FROM merchants m WHERE m.user_id = ? AND m.approved = 1
       AND (SELECT count(*) FROM offers WHERE merchant_id = m.user_id AND ends_at > ?) < 100
     RETURNING id
-  `).bind(crypto.randomUUID(), ...offerValues(input), uid, iso(Date.now())).first();
+  `).bind(crypto.randomUUID(), ...offerValues(input), offerImage(input.image_url), uid, iso(Date.now())).first();
   if (!result) {
     const merchant = await db.prepare('SELECT approved FROM merchants WHERE user_id = ?').bind(uid).first();
     if (!merchant?.approved) throw new ApiError(403, 'MERCHANT_REQUIRED');
@@ -135,14 +146,15 @@ async function editOffer(db, uid, id, input) {
   const result = await db.prepare(`
     UPDATE offers SET name = ?, venue = ?, district = ?, address = ?, north = ?,
       latitude = ?, longitude = ?, price_halalas = ?, people = ?, meal = ?,
-      inclusions = ?, starts_at = ?, ends_at = ?
+      inclusions = ?, starts_at = ?, ends_at = ?,
+      image_url = CASE WHEN ? THEN ? ELSE image_url END
     WHERE id = ? AND merchant_id = ?
       AND EXISTS (SELECT 1 FROM merchants WHERE user_id = ? AND approved = 1)
       AND NOT EXISTS (
         SELECT 1 FROM vouchers WHERE offer_id = offers.id AND redeemed_at IS NULL AND expires_at > ?
       )
     RETURNING id
-  `).bind(...offerValues(input), id, uid, uid, iso(Date.now())).first();
+  `).bind(...offerValues(input), Number(Object.hasOwn(input, 'image_url')), offerImage(input.image_url), id, uid, uid, iso(Date.now())).first();
   if (result) return result;
   const own = await db.prepare(`
     SELECT o.id FROM offers o JOIN merchants m ON m.user_id = o.merchant_id
@@ -264,7 +276,7 @@ export default {
       }
       if (path === '/api/merchant/offers') {
         if (method === 'GET') {
-          const { results } = await db.prepare('SELECT id, name, venue, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, starts_at, ends_at, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
+          const { results } = await db.prepare('SELECT id, name, venue, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, image_url, starts_at, ends_at, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
             .bind(uid).all();
           return json(results);
         }
