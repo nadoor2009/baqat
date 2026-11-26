@@ -67,8 +67,8 @@ const offerFields = [
   ['latitude', 'خط العرض', true], ['longitude', 'خط الطول', true], ['price', 'السعر النهائي بالريال', true],
   ['people', 'عدد الأشخاص', true], ['inclusions', 'مكونات الباقة'],
   ['image_url', 'رابط صورة الباقة (اختياري)', false, 'https://', 'url'],
-  ['starts_at', 'البداية بتوقيت الرياض', false, '2026-12-01 12:00'],
-  ['ends_at', 'النهاية بتوقيت الرياض', false, '2026-12-01 22:00'],
+  ['starts_at', 'البداية بتوقيت الرياض', false, 'YYYY-MM-DD HH:mm'],
+  ['ends_at', 'النهاية بتوقيت الرياض', false, 'YYYY-MM-DD HH:mm'],
 ];
 const emptyOffer = { meal: 'both', north: true };
 
@@ -317,21 +317,62 @@ function Mobile() {
 
   function saveOffer() {
     return run(async () => {
+      const invalid = message => {
+        setNote(message);
+        scroll.current?.scrollTo({ y: 0, animated: true });
+      };
+      for (const [key, min, max] of [
+        ['name', 2, 120], ['venue', 2, 120], ['district', 2, 80],
+        ['address', 3, 240], ['inclusions', 3, 1800],
+      ]) {
+        const length = (draft[key] || '').trim().length;
+        if (length < min || length > max) {
+          const label = offerFields.find(field => field[0] === key)[1];
+          return invalid(`حقل «${label}» يحتاج من ${min} إلى ${max} حرفًا.`);
+        }
+      }
+      const latitude = Number(normalize(draft.latitude || ''));
+      const longitude = Number(normalize(draft.longitude || ''));
+      const people = Number(normalize(draft.people || ''));
+      const price = Number(normalize(draft.price || ''));
+      if (!(latitude >= 24.35 && latitude <= 25.10)) {
+        return invalid('أدخل خط عرض موقع الفرع في الرياض بين 24.35 و25.10.');
+      }
+      if (!(longitude >= 46.30 && longitude <= 47.10)) {
+        return invalid('أدخل خط طول موقع الفرع في الرياض بين 46.30 و47.10.');
+      }
+      if (!(price >= 1 && price <= 100000)) {
+        return invalid('أدخل سعرًا بين ريال واحد و100,000 ريال.');
+      }
+      if (!Number.isInteger(people) || people < 1 || people > 100) {
+        return invalid('أدخل عدد الأشخاص كعدد صحيح بين 1 و100.');
+      }
+
       const time = key => {
-        const value = normalize(draft[key] || '').replace(' ', 'T');
-        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) throw new Error('INVALID_INPUT');
+        const value = normalize(draft[key] || '').replace(/\s+/, 'T');
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
+        const utc = Date.parse(value + ':00Z');
+        if (!Number.isFinite(utc) || new Date(utc).toISOString().slice(0, 16) !== value) return null;
         return value + ':00+03:00';
       };
+      const starts_at = time('starts_at');
+      const ends_at = time('ends_at');
+      if (!starts_at) return invalid('أدخل تاريخ ووقت البداية بصيغة YYYY-MM-DD HH:mm بتوقيت الرياض.');
+      if (!ends_at) return invalid('أدخل تاريخ ووقت النهاية بصيغة YYYY-MM-DD HH:mm بتوقيت الرياض.');
+      if (Date.parse(ends_at) <= Math.max(Date.parse(starts_at), Date.now())) {
+        return invalid('وقت النهاية لازم يكون بعد وقت البداية وبعد الوقت الحالي.');
+      }
+
       const path = 'merchant/offers' + (editingOffer ? '/' + editingOffer : '');
       await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
         ...draft,
         image_url: draft.image_url?.trim() || null,
-        latitude: Number(normalize(draft.latitude || '')),
-        longitude: Number(normalize(draft.longitude || '')),
-        people: Number(normalize(draft.people || '')),
-        price_halalas: Math.round(Number(normalize(draft.price || '')) * 100),
-        starts_at: time('starts_at'),
-        ends_at: time('ends_at'),
+        latitude,
+        longitude,
+        people,
+        price_halalas: Math.round(price * 100),
+        starts_at,
+        ends_at,
       } });
       cancelEdit();
       await refreshMerchant(token);
