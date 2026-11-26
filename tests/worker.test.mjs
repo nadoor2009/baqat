@@ -54,9 +54,17 @@ test('voucher issues once and can be used once only by the owner before expiry',
   assert.equal((await edit(outsider)).status, 404);
   const issue = () => post('vouchers', customer, { offer });
   const redeem = (code, token = owner) => post('vouchers/redeem', token, { code }).then(response => response.json());
+  const ownOffer = await post('vouchers', owner, { offer });
+  assert.equal(ownOffer.status, 403);
+  assert.deepEqual(await ownOffer.json(), { message: 'OWN_OFFER' });
+  const setStart = sqlite.prepare('UPDATE offers SET starts_at = ? WHERE id = ?');
+  setStart.run(new Date(Date.now() + 60000).toISOString(), offer);
+  assert.deepEqual(await (await issue()).json(), { message: 'OFFER_NOT_STARTED' });
+  setStart.run(new Date(Date.now() - 60000).toISOString(), offer);
   const attempts = await Promise.all([issue(), issue()]);
   assert.deepEqual(attempts.map(result => result.status).sort(), [201, 409]);
   const [{ code }] = await attempts.find(result => result.status === 201).json();
+  assert.deepEqual(await attempts.find(result => result.status === 409).json(), { message: 'VOUCHER_ALREADY_ACTIVE' });
   const history = token => worker.fetch(new Request('https://baqat.local/api/vouchers', {
     headers: { Authorization: 'Bearer ' + token },
   }), env).then(response => response.json());

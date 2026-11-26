@@ -205,7 +205,26 @@ async function issue(db, uid, offer) {
     RETURNING issued_at, expires_at
   `).bind(await hash(code), uid, iso(now), iso(now + 1800000), offer, uid, iso(now),
     iso(now), uid, iso(now - 3600000), uid, iso(now)).first();
-  if (!result) throw new ApiError(409, 'ISSUE_DENIED');
+  if (!result) {
+    const current = await db.prepare(`
+      SELECT o.merchant_id, o.published, m.approved, o.starts_at, o.ends_at,
+        EXISTS (
+          SELECT 1 FROM vouchers WHERE customer_id = ? AND offer_id = o.id
+            AND expires_at > ? AND redeemed_at IS NULL
+        ) AS has_active,
+        (SELECT count(*) FROM vouchers WHERE customer_id = ? AND issued_at > ?) AS recent_count
+      FROM offers o JOIN merchants m ON m.user_id = o.merchant_id
+      WHERE o.id = ?
+    `).bind(uid, iso(now), uid, iso(now - 3600000), offer).first();
+    if (!current?.published || !current.approved || current.ends_at <= iso(now)) {
+      throw new ApiError(409, 'OFFER_UNAVAILABLE');
+    }
+    if (current.merchant_id === uid) throw new ApiError(403, 'OWN_OFFER');
+    if (current.starts_at > iso(now)) throw new ApiError(409, 'OFFER_NOT_STARTED');
+    if (current.has_active) throw new ApiError(409, 'VOUCHER_ALREADY_ACTIVE');
+    if (current.recent_count >= 10) throw new ApiError(429, 'VOUCHER_RATE_LIMIT');
+    throw new ApiError(409, 'ISSUE_DENIED');
+  }
   return [{ code, issued_at: result.issued_at, expires_at: result.expires_at }];
 }
 

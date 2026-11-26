@@ -271,17 +271,49 @@ function Mobile() {
     run(async () => setReceipts(await api('vouchers', { token })));
   }
 
+  async function savedVoucher(row) {
+    const current = vouchers[row.offer_id];
+    if (current?.issued_at === row.issued_at) return current;
+    const stored = await SecureStore.getItemAsync(voucherKey(token.user.id, row.offer_id));
+    const saved = stored ? JSON.parse(stored) : null;
+    return saved?.issued_at === row.issued_at ? saved : null;
+  }
+
   async function showReceipt(receipt) {
     setReceiptCode(null);
     const latest = await api('vouchers', { token });
     setReceipts(latest);
     const row = latest.find(item => item.offer_id === receipt.offer_id && item.issued_at === receipt.issued_at);
     if (row?.status !== 'active') return setNote('الرمز لم يعد ساريًا.');
-    const stored = await SecureStore.getItemAsync(voucherKey(token.user.id, row.offer_id));
-    const saved = stored ? JSON.parse(stored) : null;
-    if (saved?.issued_at !== row.issued_at) return setNote('الرمز الصريح موجود فقط على الجهاز اللي أصدره.');
+    const saved = await savedVoucher(row);
+    if (!saved) return setNote('الرمز محفوظ على الجهاز اللي أصدره. افتحه هناك أو اطلب رمزًا جديدًا بعد انتهاء صلاحيته.');
     setReceiptCode({ ...row, code: saved.code });
     scroll.current?.scrollTo({ y: 0, animated: true });
+  }
+
+  async function openOfferVoucher() {
+    const offerId = offer.id;
+    let issued;
+    try {
+      [issued] = await api('vouchers', { token, method: 'POST', body: { offer: offerId } });
+    } catch (error) {
+      if (!['VOUCHER_ALREADY_ACTIVE', 'ISSUE_DENIED'].includes(error.message)) throw error;
+      const latest = await api('vouchers', { token });
+      const active = latest.find(row => row.offer_id === offerId && row.status === 'active');
+      if (!active) throw error;
+      issued = await savedVoucher(active);
+      if (!issued) throw new Error('VOUCHER_ON_OTHER_DEVICE');
+      setVouchers(current => ({ ...current, [offerId]: issued }));
+      navigate('voucher');
+      return;
+    }
+    setVouchers(current => ({ ...current, [offerId]: issued }));
+    navigate('voucher');
+    try {
+      await SecureStore.setItemAsync(voucherKey(token.user.id, offerId), JSON.stringify(issued));
+    } catch {
+      setNote('ظهر الرمز، لكن تعذّر حفظه على الجهاز.');
+    }
   }
 
   function toggleCompare(item) {
@@ -401,7 +433,7 @@ function Mobile() {
             <Photo meal="both" style={[styles.panelPhoto, styles.rightPhoto]} />
           </View>
           <Button label="ابدأ الآن" secondary onPress={() => begin('home')} />
-          <Button label="لديك حساب؟ سجّل الدخول" onPress={() => begin('account')} />
+          {!token && <Button label="لديك حساب؟ سجّل الدخول" onPress={() => begin('account')} />}
         </View>}
         {screen === 'home' && <>
           <Title>وش تبي تسوي اليوم؟</Title>
@@ -416,6 +448,7 @@ function Mobile() {
             <Photo meal="both" style={styles.todayPhoto} />
           </Pressable>
           <Button label="جرّب عروضًا افتراضية" secondary onPress={showPreview} />
+          <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
         </>}
         {screen === 'category' && <Card>
           <Title>{categories.find(([id]) => id === category)?.[1]}</Title>
@@ -520,20 +553,9 @@ function Mobile() {
           <Button label="الاتجاهات إلى الفرع" secondary onPress={() => run(() => Linking.openURL(
             'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(offer.latitude + ',' + offer.longitude)))} />
           <Button label={favorites[offer.id] ? '♥ محفوظة' : '♡ حفظ في المفضلة'} secondary onPress={() => toggleFavorite(offer)} />
-          {offer.sample ? <Button label="معاينة شاشة الرمز" onPress={() => navigate('voucher')} /> : activeVoucher ? <>
-            <Button label="اعرض رمز الباقة" onPress={() => navigate('voucher')} />
-            <Copy>ينتهي الرمز في {riyadhTime(voucher.expires_at)}</Copy>
-          </> : <Button label={token ? 'اطلب رمز الباقة' : 'سجّل الدخول لطلب الرمز'} disabled={busy}
-            onPress={() => token ? run(async () => {
-              const [issued] = await api('vouchers', { token, method: 'POST', body: { offer: offer.id } });
-              setVouchers(current => ({ ...current, [offer.id]: issued }));
-              navigate('voucher');
-              try {
-                await SecureStore.setItemAsync(voucherKey(token.user.id, offer.id), JSON.stringify(issued));
-              } catch {
-                setNote('ظهر الرمز، لكن تعذّر حفظه على الجهاز.');
-              }
-            }) : navigate('account')} />}
+          {offer.sample ? <Button label="معاينة شاشة الرمز" onPress={() => navigate('voucher')} /> :
+            <Button label={!token ? 'سجّل الدخول لطلب الرمز' : activeVoucher ? 'اعرض رمز الباقة' : 'اطلب رمز الباقة'}
+              disabled={busy} onPress={() => token ? run(openOfferVoucher) : navigate('account')} />}
         </Card>}
         {screen === 'voucher' && offer && <Card>
           <Title>{offer.sample ? 'معاينة رمز الباقة' : 'رمز الباقة جاهز'}</Title>
@@ -566,7 +588,6 @@ function Mobile() {
         </>}
         {screen === 'account' && <>
           <Title>حسابي</Title>
-          <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
           {(!token && firebase && !emailMode || linkingPhone) && <Card>
             <Title>{linkingPhone ? 'اربط جوالك بحسابك الحالي' : 'الدخول برقم الجوال'}</Title>
             {!challenge ? <>
