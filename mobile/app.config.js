@@ -6,6 +6,12 @@ module.exports = ({ config }) => {
   const androidFile = process.env.GOOGLE_SERVICES_JSON || './google-services.json';
   const iosReady = fs.existsSync(path.resolve(__dirname, iosFile));
   const androidReady = fs.existsSync(path.resolve(__dirname, androidFile));
+  if (process.env.EAS_BUILD === 'true' &&
+      process.env.EAS_BUILD_PLATFORM === 'ios' &&
+      process.env.EAS_BUILD_PROFILE === 'production' && !iosReady) {
+    throw new Error('Baqat iOS production requires the Firebase plist. Set GOOGLE_SERVICE_INFO_PLIST as an EAS production file variable.');
+  }
+
   return {
     ...config,
     ios: { ...config.ios, ...(iosReady ? { googleServicesFile: iosFile } : {}) },
