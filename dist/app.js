@@ -13,6 +13,8 @@ const vouchers = new Map();
 let session;
 let editingOffer;
 let isAdmin = false;
+let adminOpen = false;
+let adminSequence = 0;
 let merchant;
 let searchSequence = 0;
 
@@ -120,6 +122,11 @@ function clearSession() {
   resetOfferForm();
   merchant = undefined;
   isAdmin = false;
+  setAdminView(false);
+  byId('admin-refresh').reset();
+  byId('admin-status').textContent = '';
+  byId('admin-pending-count').textContent = '—';
+  byId('admin-approved-count').textContent = '—';
   byId('admin-requests').replaceChildren();
   vouchers.clear();
   byId('details').close();
@@ -132,7 +139,8 @@ function renderAccount() {
   byId('logout').hidden = !session;
   byId('merchant-application').hidden = !session || Boolean(merchant);
   byId('merchant').hidden = !merchant?.approved;
-  byId('admin').hidden = !isAdmin;
+  byId('admin-nav').hidden = !isAdmin;
+  byId('admin').hidden = !adminOpen || !isAdmin;
   byId('merchant-status').textContent = merchant
     ? merchant.approved ? 'حساب التاجر معتمد.' : 'طلب حساب التاجر بانتظار المراجعة.'
     : '';
@@ -149,34 +157,82 @@ async function fetchMerchant() {
   if (merchant?.approved) await fetchMerchantOffers();
 }
 
-submit('admin-refresh', async () => {
+function setAdminView(open) {
+  adminOpen = open && isAdmin;
+  adminSequence++;
+  document.body.classList.toggle('admin-view', adminOpen);
+  byId('admin').hidden = !adminOpen;
+  if (adminOpen) byId('admin-title').focus();
+}
+
+async function loadAdminMerchants() {
   const current = session;
-  const requests = await api('/api/admin/merchants', { signedIn: true });
-  if (session !== current) return;
+  const sequence = ++adminSequence;
+  const form = byId('admin-refresh');
+  const params = new URLSearchParams(new FormData(form));
+  const message = byId('admin-status');
   const container = byId('admin-requests');
-  container.replaceChildren(...requests.map(request => {
-    const card = node('article', undefined, 'card');
-    const approve = button('اعتمد الحساب', async () => {
-      if (session !== current || !window.confirm('هل تحققت من هوية منشأة «' + request.name + '»؟')) return;
-      approve.disabled = true;
-      try {
-        await api('/api/admin/merchants', {
-          signedIn: true, method: 'POST', body: { user_id: request.user_id },
+  const active = () => adminOpen && session === current && sequence === adminSequence;
+
+  message.textContent = 'جاري تحميل المنشآت…';
+  container.replaceChildren();
+  try {
+    const data = await api('/api/admin/merchants?' + params, { signedIn: true });
+    if (!active()) return;
+    byId('admin-pending-count').textContent = data.pending.toLocaleString('ar-SA');
+    byId('admin-approved-count').textContent = data.approved.toLocaleString('ar-SA');
+    const pending = params.get('status') === 'pending';
+    const requests = data.merchants;
+    message.textContent = requests.length === 0 ? 'ما فيه منشآت تطابق البحث.'
+      : requests.length === 100 ? 'نعرض حتى ١٠٠ منشأة. استخدم البحث لتحديد النتائج.' : '';
+    container.replaceChildren(...requests.map(request => {
+      const card = node('article', undefined, 'admin-row');
+      const identity = node('div');
+      identity.append(node('h3', request.name));
+      const details = node('details');
+      details.append(node('summary', 'معرّف الحساب'), node('code', request.user_id));
+      identity.append(details);
+      card.append(identity, node('span', pending ? 'بانتظار المراجعة' : 'معتمدة', 'admin-state'));
+      if (pending) {
+        const approve = button('اعتماد المنشأة', async () => {
+          if (!active() || !window.confirm('هل تحققت من هوية منشأة «' + request.name + '»؟')) return;
+          approve.disabled = true;
+          try {
+            await api('/api/admin/merchants', {
+              signedIn: true, method: 'POST', body: { user_id: request.user_id },
+            });
+            if (active()) {
+              await loadAdminMerchants();
+              if (session === current && adminOpen && !message.textContent) message.textContent = 'تم اعتماد المنشأة.';
+            }
+          } catch (error) {
+            if (active()) message.textContent = explain(error);
+          } finally {
+            approve.disabled = false;
+          }
         });
-        if (session !== current) return;
-        card.remove();
-        status('تم اعتماد حساب المنشأة.');
-      } catch (error) {
-        if (session === current) status(explain(error));
-      } finally {
-        approve.disabled = false;
+        card.append(approve);
       }
-    });
-    card.append(node('h3', request.name), node('p', request.user_id), approve);
-    return card;
-  }));
-  if (requests.length === 0) container.append(node('p', 'ما فيه طلبات بانتظار المراجعة.'));
+      return card;
+    }));
+  } catch (error) {
+    if (active()) message.textContent = explain(error);
+  }
+}
+
+byId('admin-nav').addEventListener('click', () => {
+  setAdminView(true);
+  if (adminOpen) void loadAdminMerchants();
 });
+byId('admin-back').addEventListener('click', () => {
+  setAdminView(false);
+  byId('admin-nav').focus();
+});
+byId('admin-refresh').addEventListener('submit', event => {
+  event.preventDefault();
+  void loadAdminMerchants();
+});
+byId('admin-refresh').elements.status.addEventListener('change', () => void loadAdminMerchants());
 
 function resetOfferForm() {
   editingOffer = undefined;
@@ -339,6 +395,7 @@ function showDetails(offer) {
 }
 
 byId('account-nav').addEventListener('click', () => {
+  setAdminView(false);
   byId('account').hidden = !byId('account').hidden;
   if (!byId('account').hidden) byId('account-title').scrollIntoView({ block: 'nearest' });
 });

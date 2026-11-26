@@ -97,6 +97,24 @@ async function search(params, db) {
   return results;
 }
 
+async function publicRestaurant(db, offerId) {
+  const restaurant = await db.prepare(`
+    SELECT m.name FROM merchants m JOIN offers o ON o.merchant_id = m.user_id
+    WHERE o.id = ? AND o.published = 1 AND m.approved = 1
+  `).bind(offerId).first();
+  if (!restaurant) throw new ApiError(404, 'OFFER_UNAVAILABLE');
+  const { results } = await db.prepare(`
+    SELECT o.id, o.name, o.venue, o.district, o.address, o.latitude, o.longitude,
+           o.price_halalas, o.people, o.meal, o.inclusions, o.image_url, o.starts_at, o.ends_at
+    FROM offers o JOIN offers selected ON o.merchant_id = selected.merchant_id
+    JOIN merchants m ON m.user_id = o.merchant_id
+    WHERE selected.id = ? AND selected.published = 1 AND m.approved = 1
+      AND o.published = 1 AND o.ends_at > ?
+    ORDER BY o.starts_at, o.price_halalas, o.id LIMIT 100
+  `).bind(offerId, iso(Date.now())).all();
+  return { name: restaurant.name, offers: results };
+}
+
 function offerValues(input) {
   const { meal, north } = input;
   requireValid(meals.has(meal) && typeof north === 'boolean');
@@ -229,6 +247,22 @@ function adminUids(env) {
 async function reviewMerchants(request, db, uid, env) {
   if (!adminUids(env).includes(uid)) throw new ApiError(403, 'ADMIN_REQUIRED');
   if (request.method === 'GET') {
+    const params = new URL(request.url).searchParams;
+    if (params.has('status')) {
+      const state = params.get('status');
+      requireValid(state === 'pending' || state === 'approved');
+      const query = params.get('q') || '';
+      requireValid(query.length <= 100);
+      const approved = Number(state === 'approved');
+      const [counts, list] = await db.batch([
+        db.prepare('SELECT count(*) AS total, coalesce(sum(approved), 0) AS approved FROM merchants'),
+        db.prepare(`SELECT user_id, name FROM merchants
+          WHERE approved = ? AND instr(lower(name), lower(?)) > 0
+          ORDER BY name, user_id LIMIT 100`).bind(approved, query.trim()),
+      ]);
+      const summary = counts.results[0];
+      return json({ merchants: list.results, pending: summary.total - summary.approved, approved: summary.approved });
+    }
     const { results } = await db.prepare(
       'SELECT user_id, name FROM merchants WHERE approved = 0 ORDER BY name, user_id LIMIT 100',
     ).all();
@@ -255,6 +289,8 @@ export default {
     try {
       if (method === 'GET' && path === '/api/config') return json({ apiKey: env.FIREBASE_API_KEY || '' });
       if (method === 'GET' && path === '/api/offers') return json(await search(url.searchParams, env.DB));
+      const restaurant = /^\/api\/offers\/([0-9a-f-]{36})\/restaurant$/.exec(path);
+      if (method === 'GET' && restaurant) return json(await publicRestaurant(env.DB, restaurant[1]));
       const uid = await actor(request, env);
       const db = env.DB;
       if (path === '/api/account' && method === 'GET') {

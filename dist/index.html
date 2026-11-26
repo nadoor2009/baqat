@@ -9,7 +9,7 @@
   <script type="module" src="app.js"></script>
 </head>
 <body>
-  <header><a class="brand" href="./">باقات</a><button id="account-nav" type="button">حسابي</button></header>
+  <header><a class="brand" href="./">باقات</a><div class="actions"><button id="admin-nav" type="button" hidden>لوحة الإدارة</button><button id="account-nav" type="button">حسابي</button></div></header>
   <main>
     <p id="status" role="status" aria-live="polite" hidden></p>
     <section id="account" hidden aria-labelledby="account-title">
@@ -27,10 +27,24 @@
       <p id="merchant-status"></p>
     </section>
 
-    <section id="admin" hidden aria-labelledby="admin-title">
-      <h2 id="admin-title">اعتماد التجار</h2>
-      <form id="admin-refresh"><button type="submit">اعرض طلبات الاعتماد</button></form>
-      <div id="admin-requests" class="cards" aria-live="polite"></div>
+    <section id="admin" class="admin-panel" hidden aria-labelledby="admin-title">
+      <div class="admin-heading">
+        <div><p>باقات الرياض</p><h1 id="admin-title" tabindex="-1">إدارة المنشآت</h1></div>
+        <button id="admin-back" type="button" class="admin-secondary">العودة إلى موقع باقات</button>
+      </div>
+      <div class="admin-summary">
+        <div><span>بانتظار المراجعة</span><strong id="admin-pending-count">—</strong></div>
+        <div><span>منشآت معتمدة</span><strong id="admin-approved-count">—</strong></div>
+      </div>
+      <div class="admin-workspace">
+        <form id="admin-refresh">
+          <label>حالة المنشأة<select name="status"><option value="pending">بانتظار المراجعة</option><option value="approved">معتمدة</option></select></label>
+          <label>اسم المنشأة<input name="q" type="search" maxlength="100" placeholder="ابحث باسم المنشأة"></label>
+          <button type="submit">عرض المنشآت</button>
+        </form>
+        <p id="admin-status" role="status"></p>
+        <div id="admin-requests" class="admin-results"></div>
+      </div>
     </section>
 
     <section id="merchant" hidden aria-labelledby="merchant-title">

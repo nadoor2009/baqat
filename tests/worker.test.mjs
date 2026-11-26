@@ -35,6 +35,14 @@ test('voucher issues once and can be used once only by the owner before expiry',
     headers: { Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
   }), env);
+  const publicPage = () => worker.fetch(new Request('https://baqat.local/api/offers/' + offer + '/restaurant'), env);
+  const restaurant = await (await publicPage()).json();
+  assert.equal(restaurant.name, 'Test Merchant');
+  assert.deepEqual(restaurant.offers.map(item => item.id), [offer]);
+  assert.equal('merchant_id' in restaurant.offers[0], false);
+  sqlite.prepare('UPDATE offers SET published = 0 WHERE id = ?').run(offer);
+  assert.equal((await publicPage()).status, 404);
+  sqlite.prepare('UPDATE offers SET published = 1 WHERE id = ?').run(offer);
   const edit = (token, image = {}) => post('merchant/offers/' + offer, token, {
     ...image,
     name: 'Updated dinner', venue: 'Venue', district: 'Hittin', address: 'Address',
@@ -80,7 +88,10 @@ test('merchant approval requires an allowlisted verified account and is idempote
   t.after(() => sqlite.close());
   sqlite.exec(readFileSync(new URL('../migrations/0001_baqat.sql', import.meta.url), 'utf8'));
   const prepare = sql => ({
-    bind: (...parameters) => ({ first: async () => sqlite.prepare(sql).get(...parameters) }),
+    bind: (...parameters) => ({
+      first: async () => sqlite.prepare(sql).get(...parameters),
+      all: async () => ({ results: sqlite.prepare(sql).all(...parameters) }),
+    }),
     all: async () => ({ results: sqlite.prepare(sql).all() }),
   });
   const admin = 'verified-administrator-account';
@@ -88,7 +99,7 @@ test('merchant approval requires an allowlisted verified account and is idempote
   t.mock.method(globalThis, 'fetch', async (url, request) => Response.json({
     users: [{ localId: JSON.parse(request.body).idToken, emailVerified: true }],
   }));
-  const env = { DB: { prepare }, FIREBASE_API_KEY: 'test-key', BAQAT_ADMIN_UIDS: admin };
+  const env = { DB: { prepare, batch: statements => Promise.all(statements.map(statement => statement.all())) }, FIREBASE_API_KEY: 'test-key', BAQAT_ADMIN_UIDS: admin };
   const request = (path, token, body) => worker.fetch(new Request('https://baqat.local/api/' + path, {
     method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token },
     body: body ? JSON.stringify(body) : undefined,
@@ -97,10 +108,21 @@ test('merchant approval requires an allowlisted verified account and is idempote
   assert.equal((await request('merchant', applicant, { name: 'Different name' })).status, 200);
   assert.equal((await request('admin/merchants', applicant)).status, 403);
   assert.equal((await request('admin/merchants', applicant, { user_id: applicant })).status, 403);
+  const dashboard = 'admin/merchants?status=';
+  assert.equal((await request(dashboard + 'pending', applicant)).status, 403);
+  assert.deepEqual(await (await request(dashboard + 'pending&q=test', admin)).json(), {
+    merchants: [{ user_id: applicant, name: 'Test Merchant' }], pending: 1, approved: 0,
+  });
   const pending = await (await request('admin/merchants', admin)).json();
   assert.deepEqual(pending, [{ user_id: applicant, name: 'Test Merchant' }]);
   assert.equal((await request('admin/merchants', admin, { user_id: applicant })).status, 200);
   assert.equal((await request('admin/merchants', admin, { user_id: applicant })).status, 409);
+  assert.deepEqual(await (await request(dashboard + 'approved', admin)).json(), {
+    merchants: [{ user_id: applicant, name: 'Test Merchant' }], pending: 0, approved: 1,
+  });
+  assert.deepEqual(await (await request(dashboard + 'approved&q=missing', admin)).json(), {
+    merchants: [], pending: 0, approved: 1,
+  });
   const account = await (await request('account', applicant)).json();
   assert.deepEqual(account, { merchant: { name: 'Test Merchant', approved: 1 }, admin: false });
 });

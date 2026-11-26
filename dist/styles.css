@@ -11,3 +11,21 @@ form{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}form+form{margin-blo
 #status{background:#eee3f8;padding:.65rem 1rem;border-radius:.6rem}#comparison{margin-top:1rem;overflow:auto}table{width:100%;min-width:440px;border-collapse:collapse}td,th{padding:.45rem;border:1px solid var(--line);text-align:start}
 dialog{width:min(680px,calc(100% - 2rem));border:1px solid var(--line);border-radius:1rem;padding:1.2rem}dialog::backdrop{background:#23133399}dialog>form{justify-content:end}iframe{width:100%;height:300px;border:1px solid var(--line);border-radius:.7rem;margin-block:.7rem}
 code{display:block;overflow-wrap:anywhere;padding:.6rem;background:#f1e8f7;text-align:center}[hidden]{display:none!important}
+
+.admin-view main > section:not(#admin) { display: none; }
+.admin-panel { padding: 0; background: transparent; border: 0; }
+.admin-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; border-radius: 1rem; background: #39215a; color: white; padding: clamp(1.1rem, 4vw, 2.3rem); }
+.admin-heading h1, .admin-heading p, .admin-row h3 { margin: 0; }
+.admin-heading p { color: #e7d7f4; }
+.admin-secondary { background: #f2e9f8; color: var(--accent); }
+.admin-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; margin-block: 1rem; }
+.admin-summary div, .admin-workspace { background: white; border: 1px solid var(--line); border-radius: 1rem; padding: 1rem; }
+.admin-summary strong { display: block; font-size: 1.85rem; color: var(--accent); line-height: 1.3; }
+.admin-workspace form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; }
+#admin-status { margin-block: .8rem 0; color: #614c71; }
+.admin-results { display: grid; gap: .6rem; }
+.admin-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; border: 1px solid var(--line); border-radius: .7rem; padding: .8rem; }
+.admin-row > div { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.admin-row summary { cursor: pointer; color: #614c71; font-size: .875rem; }
+.admin-state { background: #f1e8f7; color: #4d2674; padding: .2rem .7rem; border-radius: 1rem; }
+@media (max-width: 570px) { .admin-workspace form { grid-template-columns: 1fr; } }

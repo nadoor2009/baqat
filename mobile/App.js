@@ -1,3 +1,4 @@
+import { OfferDate, OfferLocation } from './OfferPickers';
 import VoucherScanner, { voucherCode } from './VoucherScanner';
 import * as SecureStore from 'expo-secure-store';
 import { phoneAuth, requestPhoneCode, confirmPhoneCode, nativeSession } from './phone';
@@ -63,12 +64,9 @@ function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
 }
 
 const offerFields = [
-  ['name', 'اسم الباقة'], ['venue', 'اسم الفرع'], ['district', 'الحي'], ['address', 'العنوان'],
-  ['latitude', 'خط العرض', true], ['longitude', 'خط الطول', true], ['price', 'السعر النهائي بالريال', true],
-  ['people', 'عدد الأشخاص', true], ['inclusions', 'مكونات الباقة'],
-  ['image_url', 'رابط صورة الباقة (اختياري)', false, 'https://', 'url'],
-  ['starts_at', 'البداية بتوقيت الرياض', false, 'YYYY-MM-DD HH:mm'],
-  ['ends_at', 'النهاية بتوقيت الرياض', false, 'YYYY-MM-DD HH:mm'],
+  ['name', 'اسم الباقة'], ['venue', 'اسم الفرع (اختياري)'],
+  ['price', 'السعر النهائي بالريال', 'decimal-pad'], ['people', 'عدد الأشخاص', 'number-pad'],
+  ['inclusions', 'مكونات الباقة'], ['image_url', 'رابط صورة الباقة (اختياري)', 'url'],
 ];
 const emptyOffer = { meal: 'both', north: true };
 
@@ -86,6 +84,7 @@ function Mobile() {
   const [offers, setOffers] = useState([]);
   const [selected, setSelected] = useState([]);
   const [offer, setOffer] = useState(null);
+  const [restaurant, setRestaurant] = useState(null);
   const [token, setToken] = useState(null);
   const [phone, setPhone] = useState('');
   const [sms, setSms] = useState('');
@@ -113,6 +112,7 @@ function Mobile() {
 
   function navigate(next) {
     setNote('');
+    setScanning(false);
     setScreen(next);
     scroll.current?.scrollTo({ y: 0, animated: false });
   }
@@ -304,15 +304,15 @@ function Mobile() {
   }
 
   function editOffer(item) {
-    const localTime = value => new Date(Date.parse(value) + 3 * 3600000)
-      .toISOString().slice(0, 16).replace('T', ' ');
     const fields = Object.fromEntries(offerFields.map(([key]) => [key, String(item[key] ?? '')]));
     setDraft({
       ...fields, price: String(item.price_halalas / 100), meal: item.meal, north: Boolean(item.north),
-      starts_at: localTime(item.starts_at), ends_at: localTime(item.ends_at),
+      district: item.district, address: item.address,
+      location: { latitude: item.latitude, longitude: item.longitude },
+      starts_at: item.starts_at, ends_at: item.ends_at,
     });
     setEditingOffer(item.id);
-    scroll.current?.scrollToEnd({ animated: true });
+    navigate('offer-editor');
   }
 
   function saveOffer() {
@@ -322,8 +322,7 @@ function Mobile() {
         scroll.current?.scrollTo({ y: 0, animated: true });
       };
       for (const [key, min, max] of [
-        ['name', 2, 120], ['venue', 2, 120], ['district', 2, 80],
-        ['address', 3, 240], ['inclusions', 3, 1800],
+        ['name', 2, 120], ['inclusions', 3, 1800],
       ]) {
         const length = (draft[key] || '').trim().length;
         if (length < min || length > max) {
@@ -331,16 +330,12 @@ function Mobile() {
           return invalid(`حقل «${label}» يحتاج من ${min} إلى ${max} حرفًا.`);
         }
       }
-      const latitude = Number(normalize(draft.latitude || ''));
-      const longitude = Number(normalize(draft.longitude || ''));
+      if (!draft.location) return invalid('حدد موقع الفرع على الخريطة.');
+      const { latitude, longitude } = draft.location;
       const people = Number(normalize(draft.people || ''));
       const price = Number(normalize(draft.price || ''));
-      if (!(latitude >= 24.35 && latitude <= 25.10)) {
-        return invalid('أدخل خط عرض موقع الفرع في الرياض بين 24.35 و25.10.');
-      }
-      if (!(longitude >= 46.30 && longitude <= 47.10)) {
-        return invalid('أدخل خط طول موقع الفرع في الرياض بين 46.30 و47.10.');
-      }
+      const venue = draft.venue?.trim() || merchant.name;
+      if (venue.length < 2) return invalid('اسم الفرع يحتاج حرفين على الأقل.');
       if (!(price >= 1 && price <= 100000)) {
         return invalid('أدخل سعرًا بين ريال واحد و100,000 ريال.');
       }
@@ -348,24 +343,22 @@ function Mobile() {
         return invalid('أدخل عدد الأشخاص كعدد صحيح بين 1 و100.');
       }
 
-      const time = key => {
-        const value = normalize(draft[key] || '').replace(/\s+/, 'T');
-        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null;
-        const utc = Date.parse(value + ':00Z');
-        if (!Number.isFinite(utc) || new Date(utc).toISOString().slice(0, 16) !== value) return null;
-        return value + ':00+03:00';
-      };
-      const starts_at = time('starts_at');
-      const ends_at = time('ends_at');
-      if (!starts_at) return invalid('أدخل تاريخ ووقت البداية بصيغة YYYY-MM-DD HH:mm بتوقيت الرياض.');
-      if (!ends_at) return invalid('أدخل تاريخ ووقت النهاية بصيغة YYYY-MM-DD HH:mm بتوقيت الرياض.');
+      const { starts_at, ends_at } = draft;
+      if (!starts_at) return invalid('اختر تاريخ ووقت بداية الباقة.');
+      if (!ends_at) return invalid('اختر تاريخ ووقت نهاية الباقة.');
       if (Date.parse(ends_at) <= Math.max(Date.parse(starts_at), Date.now())) {
         return invalid('وقت النهاية لازم يكون بعد وقت البداية وبعد الوقت الحالي.');
       }
 
       const path = 'merchant/offers' + (editingOffer ? '/' + editingOffer : '');
       await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
-        ...draft,
+        name: draft.name.trim(),
+        venue,
+        district: draft.district || (draft.north ? 'شمال الرياض' : 'الرياض'),
+        address: draft.address || (draft.north ? 'شمال الرياض' : 'الرياض'),
+        meal: draft.meal,
+        north: draft.north,
+        inclusions: draft.inclusions.trim(),
         image_url: draft.image_url?.trim() || null,
         latitude,
         longitude,
@@ -377,6 +370,7 @@ function Mobile() {
       cancelEdit();
       await refreshMerchant(token);
       if (searched) await search();
+      navigate('merchant');
       setNote(editingOffer ? 'تم حفظ تعديلات الباقة.' : 'تم حفظ المسودة.');
     });
   }
@@ -499,13 +493,29 @@ function Mobile() {
           </Card>)}
           <Button label="العودة إلى الباقات" secondary onPress={() => navigate('results')} />
         </>}
+        {screen === 'restaurant' && restaurant && <>
+          <View style={styles.hero}>
+            <Text style={styles.heroTitle}>{restaurant.name}</Text>
+            <Text style={styles.heroText}>باقات المطعم</Text>
+          </View>
+          {!restaurant.offers.length && <Card><Copy>ما فيه باقات متاحة حاليًا.</Copy></Card>}
+          {restaurant.offers.map(item => <OfferCard key={item.id} offer={item}
+            onOpen={() => openOffer(item)} saved={!!favorites[item.id]}
+            onSave={() => toggleFavorite(item)} selected={selected.some(chosen => chosen.id === item.id)}
+            onCompare={() => toggleCompare(item)} />)}
+        </>}
         {screen === 'detail' && offer && <Card>
           <Photo uri={offer.image_url} meal={offer.meal} style={styles.detailPhoto} />
           {offer.sample && <Copy>عرض تجريبي · الصور توضيحية</Copy>}
           <Title>{offer.name}</Title><Text style={styles.price}>{money(offer.price_halalas)}</Text>
           <Copy>{offer.venue} · {offer.district} · حتى {offer.people} أشخاص</Copy>
+          {!offer.sample && <Button label="عرض صفحة المطعم" secondary disabled={busy}
+            onPress={() => run(async () => {
+              setRestaurant(await api('offers/' + offer.id + '/restaurant'));
+              navigate('restaurant');
+            })} />}
           <Title>محتويات الباقة</Title>
-          <Copy>{offer.inclusions}</Copy><Copy>{offer.address}</Copy>
+          <Copy>{offer.inclusions}</Copy>{offer.address && offer.address !== offer.district && <Copy>{offer.address}</Copy>}
           <Copy>{riyadhTime(offer.starts_at)} إلى {riyadhTime(offer.ends_at)}</Copy>
           <Button label="الاتجاهات إلى الفرع" secondary onPress={() => run(() => Linking.openURL(
             'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(offer.latitude + ',' + offer.longitude)))} />
@@ -609,7 +619,38 @@ function Mobile() {
           </>}
         </>}
         {screen === 'merchant' && merchant?.approved ? <>
-          <Title>لوحة {merchant.name}</Title>
+          <View style={styles.hero}>
+            <Text style={styles.heroText}>لوحة المنشأة</Text>
+            <Text style={styles.heroTitle}>{merchant.name}</Text>
+            <View style={styles.row}>
+              <Button label="أضف باقة" secondary onPress={() => { cancelEdit(); navigate('offer-editor'); }} />
+              <Button label="استخدم رمز عميل" secondary onPress={() => navigate('merchant-redeem')} />
+            </View>
+          </View>
+          <Title>باقاتي</Title>
+          {!merchantOffers.length && <Card><Copy>ما أضفت أي باقة إلى الآن.</Copy></Card>}
+          {merchantOffers.map(item => {
+            const expired = Date.parse(item.ends_at) <= Date.now();
+            return <Card key={item.id}>
+              <View style={styles.offerRow}>
+                <View style={styles.offerText}>
+                  <Text style={styles.sample}>{expired ? 'منتهية' : item.published ? 'منشورة' : 'مسودة'}</Text>
+                  <Title>{item.name}</Title>
+                  <Copy>{money(item.price_halalas)} · {item.people} أشخاص</Copy>
+                  <Copy>حتى {riyadhTime(item.ends_at)}</Copy>
+                </View>
+                <Photo uri={item.image_url} meal={item.meal} style={styles.thumbnail} />
+              </View>
+              <View style={styles.row}>
+                <Button label="تعديل" secondary disabled={busy} onPress={() => editOffer(item)} />
+                <Button label={item.published ? 'أوقف النشر' : 'انشر الباقة'}
+                  disabled={busy || (expired && !item.published)} onPress={() => publish(item)} />
+              </View>
+            </Card>;
+          })}
+        </> : null}
+        {screen === 'merchant-redeem' && merchant?.approved ? <>
+          <Button label="العودة إلى لوحة المنشأة" secondary onPress={() => navigate('merchant')} />
           <Card>
             <Title>استخدام رمز العميل</Title>
             <Button label="امسح رمز العميل" secondary disabled={busy} onPress={() => setScanning(true)} />
@@ -628,23 +669,35 @@ function Mobile() {
               scroll.current?.scrollTo({ y: 0, animated: true });
             })} />
           </Card>
-          {merchantOffers.map(item => <Card key={item.id}>
-            <Copy>{item.name} · {item.published ? 'منشورة' : 'مسودة'}</Copy>
-            <Button label={item.published ? 'أوقف النشر' : 'انشر الباقة'} disabled={busy} onPress={() => publish(item)} />
-            <Button label="عدّل الباقة" secondary disabled={busy} onPress={() => editOffer(item)} />
-          </Card>)}
+        </> : null}
+        {screen === 'offer-editor' && merchant?.approved ? <>
+          <Button label="العودة إلى لوحة المنشأة" secondary disabled={busy} onPress={() => navigate('merchant')} />
+          <Title>{editingOffer ? 'تعديل الباقة' : 'باقة جديدة'}</Title>
           <Card>
-            <Title>{editingOffer ? 'تعديل الباقة' : 'أضف باقة'}</Title>
-            {offerFields.map(([key, label, numeric, placeholder, keyboard]) => <Input key={key} label={label}
-              value={draft[key] || ''} keyboardType={keyboard || (numeric ? 'decimal-pad' : 'default')}
-              placeholder={placeholder} ltr={numeric || !!placeholder}
+            <Title>تفاصيل الباقة</Title>
+            {offerFields.map(([key, label, keyboard]) => <Input key={key} label={label}
+              value={draft[key] || ''} keyboardType={keyboard || 'default'} ltr={!!keyboard}
+              maxLength={{ name: 120, venue: 120, inclusions: 1800, image_url: 2048 }[key]}
+              multiline={key === 'inclusions'}
               onChangeText={value => setDraft(current => ({ ...current, [key]: value }))} />)}
-            <Choices options={meals} value={draft.meal} change={meal => setDraft({ ...draft, meal })} />
-            <Choices options={[[true, 'شمال الرياض'], [false, 'بقية الرياض']]} value={draft.north}
-              change={north => setDraft({ ...draft, north })} />
-            <Button label={editingOffer ? 'احفظ التعديلات' : 'احفظ المسودة'} disabled={busy} onPress={saveOffer} />
-            {!!editingOffer && <Button label="إلغاء التعديل" secondary disabled={busy} onPress={cancelEdit} />}
+            <Choices options={meals} value={draft.meal} change={meal => setDraft(current => ({ ...current, meal }))} />
           </Card>
+          <Card>
+            <Title>الموقع</Title>
+            <OfferLocation location={draft.location}
+              onChange={location => setDraft(current => ({ ...current, location, district: undefined, address: undefined }))} />
+            <Choices options={[[true, 'شمال الرياض'], [false, 'بقية الرياض']]} value={draft.north}
+              change={north => setDraft(current => ({ ...current, north, district: undefined, address: undefined }))} />
+          </Card>
+          <Card>
+            <Title>فترة التوفر</Title>
+            <OfferDate label="البداية" value={draft.starts_at}
+              onChange={starts_at => setDraft(current => ({ ...current, starts_at }))} />
+            <OfferDate label="النهاية" value={draft.ends_at}
+              suggested={draft.starts_at && Date.parse(draft.starts_at) + 3600000}
+              onChange={ends_at => setDraft(current => ({ ...current, ends_at }))} />
+          </Card>
+          <Button label={editingOffer ? 'احفظ التعديلات' : 'احفظ المسودة'} disabled={busy} onPress={saveOffer} />
         </> : null}
       </ScrollView>
     </KeyboardAvoidingView>
