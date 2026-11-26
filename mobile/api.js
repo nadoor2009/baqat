@@ -41,6 +41,11 @@ export async function authenticate(mode, email, password) {
 }
 
 export function errorMessage(error) {
+  if (error.code === 'auth/operation-not-allowed' || error.message === 'OPERATION_NOT_ALLOWED') {
+    const reason = /\b(?:BILLING_NOT_ENABLED|SMS_REGION_NOT_ALLOWED|CONFIGURATION_NOT_FOUND|OPERATION_NOT_ALLOWED)\b/.exec(error.message || '')?.[0];
+    return `رفض Firebase بدء التحقق بالجوال. رمز التشخيص: ${reason || 'auth/operation-not-allowed'}.`;
+  }
+
   const messages = {
     INVALID_PHONE: 'أدخل رقم جوال سعودي صحيح.',
     INVALID_CODE: 'أدخل رمز التحقق المكون من ٦ أرقام.',
@@ -50,7 +55,6 @@ export function errorMessage(error) {
     'auth/session-expired': 'انتهت صلاحية الرمز. أرسل رمزًا جديدًا.',
     'auth/too-many-requests': 'طلبات كثيرة. حاول لاحقًا.',
     'auth/credential-already-in-use': 'رقم الجوال مرتبط بحساب آخر.',
-    'auth/operation-not-allowed': 'الدخول بالجوال غير مفعّل في Firebase.',
     INVALID_LOGIN_CREDENTIALS: 'تأكد من البريد الإلكتروني وكلمة المرور.',
     EMAIL_EXISTS: 'هذا البريد مسجل بالفعل. جرّب تسجيل الدخول.',
     EMAIL_UNVERIFIED: 'أكّد بريدك الإلكتروني أولًا. تقدر تعيد إرسال رسالة التأكيد.',
