@@ -1,3 +1,4 @@
+import { colors, Icon } from './ui';
 import { OfferDate, OfferLocation } from './OfferPickers';
 import VoucherScanner, { voucherCode } from './VoucherScanner';
 import * as SecureStore from 'expo-secure-store';
@@ -19,46 +20,58 @@ const areas = [['north', 'شمال الرياض'], ['all', 'كل الرياض']]
 const money = amount => new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 2 }).format(amount / 100) + ' ريال';
 const normalize = value => value.trim().replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit)).replace(/٫/g, '.');
 
-function Button({ label, onPress, secondary = false, disabled = false }) {
-  return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled}
-    onPress={onPress} style={[styles.button, secondary && styles.secondary, disabled && styles.disabled]}>
+function Button({ label, onPress, secondary = false, disabled = false, selected, icon, filled, accessibilityLabel }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel || label}
+    accessibilityState={{ disabled, selected }} disabled={disabled} onPress={onPress}
+    style={({ pressed }) => [styles.button, secondary && styles.secondary,
+      pressed && styles.pressed, disabled && styles.disabled]}>
+    {icon && <Icon name={icon} color={secondary ? colors.primary : colors.onPrimary} size={18} filled={filled} />}
     <Text style={[styles.buttonText, secondary && styles.secondaryText]}>{label}</Text>
   </Pressable>;
 }
 
-function Input({ label, value, onChangeText, ltr, inputRef, ...props }) {
+function Input({ label, value, onChangeText, ltr, ...props }) {
+  const [focused, setFocused] = useState(false);
   return <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
-    <TextInput ref={inputRef} accessibilityLabel={label} value={value} onChangeText={onChangeText}
-      style={[styles.input, ltr && styles.ltr]} placeholderTextColor="#766883" {...props} />
+    <TextInput accessibilityLabel={label} value={value} onChangeText={onChangeText}
+      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+      style={[styles.input, ltr && styles.ltr, focused && styles.inputFocused]}
+      placeholderTextColor={colors.muted} {...props} />
   </View>;
 }
 
 function Choices({ options, value, change }) {
   return <View style={styles.row}>{options.map(([id, label]) =>
-    <Button key={id} label={label} secondary={value !== id} onPress={() => change(id)} />)}</View>;
+    <Button key={id} label={label} selected={value === id} secondary={value !== id} onPress={() => change(id)} />)}</View>;
 }
 
-function Card({ children }) { return <View style={styles.card}>{children}</View>; }
+function Card({ children, style }) { return <View style={[styles.card, style]}>{children}</View>; }
 function Title({ children }) { return <Text accessibilityRole="header" style={styles.title}>{children}</Text>; }
 function Copy({ children }) { return <Text style={styles.copy}>{children}</Text>; }
 
 function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
-  return <Card>
-    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={'تفاصيل ' + offer.name} style={styles.offerRow}>
-      <View style={styles.offerText}>
+  return <Card style={styles.listing}>
+    <Pressable onPress={onOpen} accessibilityRole="button"
+      accessibilityLabel={offer.name + '، ' + money(offer.price_halalas)}
+      accessibilityHint={offer.venue + '، ' + offer.district + (offer.sample ? '، عرض تجريبي' : '')}
+      style={({ pressed }) => [styles.listingLink, pressed && styles.pressed]}>
+      <Photo uri={offer.image_url} meal={offer.meal} style={styles.listingPhoto} />
+      <View style={styles.listingDetails}>
         {offer.sample && <Text style={styles.sample}>عرض تجريبي</Text>}
         <Title>{offer.name}</Title>
         <Copy>{offer.venue} · {offer.district}</Copy>
-        <Text style={styles.price}>{money(offer.price_halalas)}</Text>
-        <Copy>حتى {offer.people} أشخاص</Copy>
+        <View style={styles.listingMeta}>
+          <Text style={styles.price}>{money(offer.price_halalas)}</Text>
+          <Copy>حتى {offer.people} أشخاص</Copy>
+        </View>
       </View>
-      <Photo uri={offer.image_url} meal={offer.meal} style={styles.thumbnail} />
     </Pressable>
-    <View style={styles.row}>
+    <View style={styles.listingActions}>
       <Button label="التفاصيل" onPress={onOpen} />
-      <Button label={saved ? "♥ محفوظة" : "♡ حفظ"} secondary onPress={onSave} />
-      <Button label={selected ? 'إلغاء الاختيار' : 'قارن'} onPress={onCompare} secondary />
+      <Button label={saved ? 'محفوظة' : 'حفظ'} icon="heart" filled={saved}
+        selected={saved} secondary onPress={onSave} />
+      <Button label={selected ? 'إلغاء المقارنة' : 'قارن'} selected={selected} onPress={onCompare} secondary />
     </View>
   </Card>;
 }
@@ -108,7 +121,6 @@ function Mobile() {
   const [searched, setSearched] = useState(false);
   const running = useRef(false);
   const scroll = useRef(null);
-  const dateInput = useRef(null);
 
   function navigate(next) {
     setNote('');
@@ -413,18 +425,25 @@ function Mobile() {
   const displayed = [...activeOffers];
   if (sort === 'price') displayed.sort((a, b) => a.price_halalas - b.price_halalas);
   if (sort === 'person') displayed.sort((a, b) => a.price_halalas / a.people - b.price_halalas / b.people);
-  const dateAfter = days => new Date(Date.parse(riyadhDay() + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10);
+  const today = riyadhDay();
+  const dateAfter = days => new Date(Date.parse(today + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10);
+  const weekday = new Date(today + 'T00:00:00Z').getUTCDay();
+  const weekend = dateAfter(weekday === 6 ? 0 : (5 - weekday + 7) % 7);
   const voucher = offer ? vouchers[offer.id] : null;
   const activeVoucher = voucher && Date.parse(voucher.expires_at) > Date.now();
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="dark-content" />
-    {screen !== 'welcome' && <View style={styles.header}><Text style={styles.logo}>باقات</Text><Text style={styles.city}>⌖ الرياض</Text></View>}
+    {screen !== 'welcome' && <View style={styles.header}>
+      <View style={styles.brand}><View style={styles.brandMark}><Icon name="ticket" color={colors.onPrimary} /></View>
+        <Text style={styles.logo}>باقات</Text></View>
+      <View style={styles.cityPill}><Icon name="pin" size={18} /><Text style={styles.city}>الرياض</Text></View>
+    </View>}
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, screen === 'welcome' && styles.welcomeContent]}>
         {!!note && <Text accessibilityLiveRegion="polite" style={styles.note}>{note}</Text>}
-        {busy && <ActivityIndicator accessibilityLabel="جاري التحميل" color="#512477" />}
+        {busy && <ActivityIndicator accessibilityLabel="جاري التحميل" color={colors.primary} />}
         {screen === 'welcome' && <View style={[styles.hero, styles.welcome]}>
-          <Text style={styles.welcomeIcon}>🎁</Text>
+          <View style={styles.welcomeMark}><Icon name="ticket" size={40} color={colors.onPrimary} /></View>
           <Text style={styles.welcomeTitle}>باقات</Text>
           <Text style={styles.heroText}>أفضل الباقات في مكان واحد، بالوقت والمكان اللي تبيه.</Text>
           <View style={styles.collage}>
@@ -436,17 +455,16 @@ function Mobile() {
           {!token && <Button label="لديك حساب؟ سجّل الدخول" onPress={() => begin('account')} />}
         </View>}
         {screen === 'home' && <>
-          <Title>وش تبي تسوي اليوم؟</Title>
+          <View style={styles.homeFeature}>
+            <Photo meal="both" style={styles.homePhoto} />
+            <View style={styles.homeBody}>
+              <Text accessibilityRole="header" style={styles.heroTitle}>وش ودّك تاكل اليوم؟</Text>
+              <Text style={styles.heroText}>اكتشف باقات الغداء والعشاء في الرياض حسب وقتك وميزانيتك.</Text>
+              <Button label="ابحث عن باقة" icon="search" secondary onPress={() => navigate('search')} />
+            </View>
+          </View>
+          <Title>تصفّح حسب الفئة</Title>
           <CategoryGrid onSelect={selectCategory} />
-          <Pressable accessibilityRole="button" accessibilityLabel="ابحث عن باقات اليوم" style={styles.today}
-            onPress={() => {
-              setFilters(current => ({ ...current, day: riyadhDay() }));
-              navigate('search');
-            }}>
-            <View style={styles.offerText}><Text style={styles.todayTitle}>باقات اليوم</Text>
-              <Text style={styles.todayCopy}>استعرض الباقات المتاحة اليوم</Text></View>
-            <Photo meal="both" style={styles.todayPhoto} />
-          </Pressable>
           <Button label="جرّب عروضًا افتراضية" secondary onPress={showPreview} />
           <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
         </>}
@@ -461,20 +479,19 @@ function Mobile() {
             <Choices options={meals} value={filters.meal} change={meal => setFilters({ ...filters, meal })} />
             <Copy>متى؟</Copy>
             <View style={styles.row}>
-              <Button label="اليوم" secondary={filters.day !== riyadhDay()} onPress={() => setFilters({ ...filters, day: riyadhDay() })} />
-              <Button label="نهاية الأسبوع" secondary onPress={() => {
-                const weekday = new Date(riyadhDay() + 'T00:00:00Z').getUTCDay();
-                setFilters({ ...filters, day: dateAfter(weekday === 6 ? 0 : (5 - weekday + 7) % 7) });
-              }} />
-              <Button label="وقت لاحق" secondary onPress={() => dateInput.current?.focus()} />
+              <Button label="اليوم" selected={filters.day === today} secondary={filters.day !== today}
+                onPress={() => setFilters(current => ({ ...current, day: today }))} />
+              <Button label="نهاية الأسبوع" selected={filters.day !== today && filters.day === weekend}
+                secondary={filters.day === today || filters.day !== weekend}
+                onPress={() => setFilters(current => ({ ...current, day: weekend }))} />
             </View>
-            <Input inputRef={dateInput} label="التاريخ الميلادي" placeholder="YYYY-MM-DD" value={filters.day} ltr
-              onChangeText={day => setFilters({ ...filters, day })} />
+            <OfferDate label="تاريخ الباقة" dateOnly value={filters.day + 'T12:00:00+03:00'}
+              onChange={date => setFilters(current => ({ ...current, day: new Date(Date.parse(date) + 3 * 3600000).toISOString().slice(0, 10) }))} />
             <Copy>عدد الأشخاص</Copy>
             <View style={styles.row}>
-              <Button label="−" secondary disabled={Number(filters.people) <= 1} onPress={() => setFilters({ ...filters, people: String(Number(filters.people) - 1) })} />
+              <Button label="−" accessibilityLabel="أنقص عدد الأشخاص" secondary disabled={Number(filters.people) <= 1} onPress={() => setFilters({ ...filters, people: String(Number(filters.people) - 1) })} />
               <Text style={styles.stepper}>{filters.people}</Text>
-              <Button label="+" secondary disabled={Number(filters.people) >= 100} onPress={() => setFilters({ ...filters, people: String(Number(filters.people) + 1) })} />
+              <Button label="+" accessibilityLabel="زد عدد الأشخاص" secondary disabled={Number(filters.people) >= 100} onPress={() => setFilters({ ...filters, people: String(Number(filters.people) + 1) })} />
             </View>
             <Input label="الميزانية القصوى بالريال" value={filters.budget} keyboardType="decimal-pad" ltr
               onChangeText={budget => setFilters({ ...filters, budget })} />
@@ -492,8 +509,12 @@ function Mobile() {
           </View>
           <Choices options={[['default', 'نتائج البحث'], ['price', 'الأقل سعرًا'], ['person', 'الأقل للشخص']]} value={sort} change={setSort} />
           {selected.length >= 2 && <Button label={'قارن الباقات (' + selected.length + ')'} onPress={() => navigate('compare')} />}
-          <Title>{displayed.length ? displayed.length + ' باقات مطابقة' : 'ما لقينا باقات مطابقة'}</Title>
-          {!displayed.length && !preview && <Button label="استعرض باقات تجريبية" secondary onPress={showPreview} />}
+          {displayed.length > 0 && <Title>الباقات المطابقة ({displayed.length})</Title>}
+          {!busy && !displayed.length && <Card>
+            <Title>ما لقينا باقات مطابقة</Title>
+            <Copy>جرّب تاريخًا آخر أو وسّع نطاق البحث.</Copy>
+            {!preview && <Button label="استعرض باقات تجريبية" secondary onPress={showPreview} />}
+          </Card>}
           {displayed.map(renderOffer)}
         </>}
         {screen === 'favorites' && <>
@@ -552,7 +573,7 @@ function Mobile() {
           <Copy>{riyadhTime(offer.starts_at)} إلى {riyadhTime(offer.ends_at)}</Copy>
           <Button label="الاتجاهات إلى الفرع" secondary onPress={() => run(() => Linking.openURL(
             'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(offer.latitude + ',' + offer.longitude)))} />
-          <Button label={favorites[offer.id] ? '♥ محفوظة' : '♡ حفظ في المفضلة'} secondary onPress={() => toggleFavorite(offer)} />
+          <Button label={favorites[offer.id] ? 'محفوظة' : 'حفظ في المفضلة'} icon="heart" filled={!!favorites[offer.id]} selected={!!favorites[offer.id]} secondary onPress={() => toggleFavorite(offer)} />
           {offer.sample ? <Button label="معاينة شاشة الرمز" onPress={() => navigate('voucher')} /> :
             <Button label={!token ? 'سجّل الدخول لطلب الرمز' : activeVoucher ? 'اعرض رمز الباقة' : 'اطلب رمز الباقة'}
               disabled={busy} onPress={() => token ? run(openOfferVoucher) : navigate('account')} />}
@@ -723,14 +744,14 @@ function Mobile() {
       </ScrollView>
     </KeyboardAvoidingView>
     {screen !== 'welcome' && <View style={styles.footer}>
-      {[[ 'home', '⌂', 'الرئيسية'], ['results', '⌕', 'الباقات'], ['favorites', '♡', 'المفضلة'], ['account', '♙', 'حسابي']]
+      {[['home', 'home', 'الرئيسية'], ['results', 'search', 'الباقات'], ['favorites', 'heart', 'المفضلة'], ['account', 'account', 'حسابي']]
         .map(([target, icon, label]) => <Pressable key={target} accessibilityRole="tab"
-          accessibilityState={{ selected: screen === target }} style={styles.tab}
+          accessibilityState={{ selected: screen === target }} style={({ pressed }) => [styles.tab, pressed && styles.pressed]}
           onPress={() => {
             if (target === 'results' && !searched && !preview) { navigate('results'); run(() => search(true)); }
             else navigate(target);
           }}>
-          <Text style={[styles.tabIcon, screen === target && styles.tabActive]}>{icon}</Text>
+          <View style={[styles.tabIcon, screen === target && styles.tabIconActive]}><Icon name={icon} color={screen === target ? colors.primary : colors.muted} /></View>
           <Text style={[styles.tabLabel, screen === target && styles.tabActive]}>{label}</Text>
         </Pressable>)}
     </View>}
@@ -742,35 +763,40 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f6f2f9' },
+  safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  header: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 10 },
-  logo: { color: '#512477', fontSize: 28, fontWeight: '900' },
-  city: { color: '#59476a', fontSize: 15 },
-  content: { padding: 16, paddingBottom: 32, gap: 14 },
-  hero: { backgroundColor: '#512477', padding: 22, borderRadius: 20, gap: 7 },
+  header: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
+  brand: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flexShrink: 1 },
+  brandMark: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
+  cityPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.soft, borderRadius: 16 },
+  logo: { color: colors.primary, fontSize: 28, fontWeight: '900' },
+  city: { color: colors.muted, fontSize: 15 },
+  content: { padding: 16, paddingBottom: 32, gap: 16, width: '100%', maxWidth: 640, alignSelf: 'center' },
+  hero: { backgroundColor: colors.primary, padding: 22, borderRadius: 20, gap: 7 },
   heroTitle: { color: 'white', fontSize: 29, fontWeight: '900', textAlign: 'right' },
-  heroText: { color: '#f3e6fb', fontSize: 16, textAlign: 'right', lineHeight: 25 },
-  card: { backgroundColor: 'white', borderColor: '#e7dced', borderWidth: 1, padding: 16, gap: 12, borderRadius: 16 },
-  title: { color: '#2a1838', fontSize: 20, fontWeight: '800', textAlign: 'right' },
-  copy: { color: '#493951', fontSize: 16, textAlign: 'right', lineHeight: 24 },
-  price: { color: '#512477', fontSize: 24, fontWeight: '800', textAlign: 'right' },
+  heroText: { color: colors.onDeep, fontSize: 16, textAlign: 'right', lineHeight: 25 },
+  card: { backgroundColor: 'white', borderColor: colors.border, borderWidth: 1, padding: 16, gap: 12, borderRadius: 16 },
+  title: { color: colors.ink, fontSize: 20, fontWeight: '800', textAlign: 'right' },
+  copy: { color: colors.muted, fontSize: 16, textAlign: 'right', lineHeight: 24 },
+  price: { color: colors.primary, fontSize: 24, fontWeight: '800', textAlign: 'right' },
   row: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
-  button: { minHeight: 46, alignItems: 'center', justifyContent: 'center', backgroundColor: '#512477', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
-  buttonText: { color: 'white', fontSize: 15, fontWeight: '700', textAlign: 'center' },
-  secondary: { backgroundColor: '#eee4f5' },
-  secondaryText: { color: '#512477' },
+  button: { minWidth: 48, minHeight: 48, flexShrink: 1, flexDirection: 'row-reverse', gap: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14 },
+  buttonText: { flexShrink: 1, color: 'white', fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  secondary: { backgroundColor: colors.soft },
+  secondaryText: { color: colors.primary },
+  pressed: { opacity: 0.72 },
   disabled: { opacity: 0.5 },
   field: { gap: 5 },
   label: { fontSize: 15, color: '#352642', textAlign: 'right' },
-  input: { borderWidth: 1, borderColor: '#bbaac5', borderRadius: 9, padding: 9, minHeight: 45, fontSize: 16, color: '#2a1838', textAlign: 'right' },
+  input: { borderWidth: 1, borderColor: colors.outline, borderRadius: 9, padding: 9, minHeight: 48, fontSize: 16, color: colors.ink, textAlign: 'right' },
+  inputFocused: { borderColor: colors.primary, backgroundColor: colors.soft },
   ltr: { textAlign: 'left', writingDirection: 'ltr' },
-  note: { padding: 12, backgroundColor: '#eee4f5', borderRadius: 10, color: '#44205f', fontSize: 16, textAlign: 'right' },
-  code: { textAlign: 'center', writingDirection: 'ltr', fontSize: 16, padding: 12, backgroundColor: '#eee4f5', color: '#44205f', borderRadius: 10 },
+  note: { padding: 12, backgroundColor: colors.soft, borderRadius: 10, color: '#44205f', fontSize: 16, textAlign: 'right' },
+  code: { textAlign: 'center', writingDirection: 'ltr', fontSize: 16, padding: 12, backgroundColor: colors.soft, color: '#44205f', borderRadius: 10 },
   welcomeContent: { flexGrow: 1, paddingBottom: 16 },
-  welcome: { flexGrow: 1, justifyContent: 'center', gap: 16, backgroundColor: '#39215a' },
+  welcome: { flexGrow: 1, justifyContent: 'center', gap: 16, backgroundColor: colors.deep },
   welcomeTitle: { textAlign: 'center', color: '#fff', fontSize: 44, fontWeight: '900' },
-  welcomeIcon: { textAlign: 'center', color: '#f5eaff', fontSize: 44 },
+  welcomeMark: { alignSelf: 'center', backgroundColor: colors.primary, padding: 12, borderRadius: 20 },
   collage: { flexDirection: 'row', gap: 7, paddingHorizontal: 4, marginVertical: 16 },
   panelPhoto: { flex: 1, width: 0, height: 124, borderWidth: 2, borderColor: '#f5eaff' },
   leftPhoto: { transform: [{ rotate: '-7deg' }], marginTop: 12 },
@@ -779,17 +805,23 @@ const styles = StyleSheet.create({
   offerText: { flex: 1, gap: 4 },
   thumbnail: { width: 92, height: 104 },
   sample: { color: '#4f356a', backgroundColor: '#f1e7f8', fontWeight: '700', alignSelf: 'flex-end', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  today: { backgroundColor: '#3b245a', flexDirection: 'row-reverse', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16 },
-  todayTitle: { color: 'white', textAlign: 'right', fontSize: 19, fontWeight: '800' },
-  todayCopy: { color: '#f0e5fa', textAlign: 'right', fontSize: 14 },
-  todayPhoto: { width: 94, height: 76 },
+  homeFeature: { overflow: 'hidden', borderRadius: 24, backgroundColor: colors.deep },
+  homePhoto: { height: 172, borderRadius: 0 },
+  homeBody: { gap: 12, padding: 16 },
+  listing: { padding: 0, gap: 0, overflow: 'hidden' },
+  listingLink: { minHeight: 48 },
+  listingPhoto: { height: 148, borderRadius: 0 },
+  listingDetails: { gap: 4, padding: 16 },
+  listingMeta: { flexDirection: 'row-reverse', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  listingActions: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8, padding: 12, borderTopWidth: 1, borderTopColor: colors.border },
   map: { width: '100%', height: 310, borderRadius: 16 },
   qr: { alignItems: 'center', padding: 14 },
   detailPhoto: { height: 210 },
-  stepper: { fontSize: 18, padding: 12, color: '#512477' },
+  stepper: { fontSize: 18, padding: 12, color: colors.primary },
   tab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  tabIcon: { fontSize: 26, color: '#65566e' },
-  tabLabel: { color: '#65566e', fontSize: 13 },
-  tabActive: { color: '#512477', fontWeight: '900' },
-  footer: { backgroundColor: 'white', flexDirection: 'row-reverse', justifyContent: 'space-evenly', paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: 1, borderTopColor: '#e7dced' },
+  tabIcon: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12 },
+  tabIconActive: { backgroundColor: colors.soft },
+  tabLabel: { color: colors.muted, fontSize: 13 },
+  tabActive: { color: colors.primary, fontWeight: '900' },
+  footer: { backgroundColor: 'white', flexDirection: 'row-reverse', justifyContent: 'space-evenly', paddingHorizontal: 12, paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.border },
 });

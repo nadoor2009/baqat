@@ -3,19 +3,21 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import MapView, { Marker } from 'react-native-maps';
+import { colors } from './ui';
 import { riyadhTime } from './api';
 
 const zone = 'Asia/Riyadh';
+const calendarDate = new Intl.DateTimeFormat('ar-SA', { calendar: 'gregory', dateStyle: 'full', timeZone: zone });
 const center = { latitude: 24.76, longitude: 46.68 };
 
 function Action({ children, onPress, primary = false, disabled = false }) {
   return <Pressable accessibilityRole="button" disabled={disabled} accessibilityState={{ disabled }}
-    style={[styles.action, primary && styles.primary, disabled && styles.disabled]} onPress={onPress}>
+    style={({ pressed }) => [styles.action, primary && styles.primary, pressed && styles.pressed, disabled && styles.disabled]} onPress={onPress}>
     <Text style={[styles.text, primary && styles.white]}>{children}</Text>
   </Pressable>;
 }
 
-export function OfferDate({ label, value, suggested, onChange }) {
+export function OfferDate({ label, value, suggested, onChange, dateOnly = false }) {
   const [selection, setSelection] = useState(null);
   const open = () => {
     const initial = new Date(value || suggested || Date.now());
@@ -23,6 +25,7 @@ export function OfferDate({ label, value, suggested, onChange }) {
       DateTimePickerAndroid.open({
         value: initial, mode: 'date', timeZoneName: zone,
         onValueChange: (_, day) => {
+          if (dateOnly) { onChange(day.toISOString()); return; }
           DateTimePickerAndroid.open({
             value: day, mode: 'time', is24Hour: true, timeZoneName: zone,
             onValueChange: (_, time) => onChange(time.toISOString()),
@@ -35,12 +38,12 @@ export function OfferDate({ label, value, suggested, onChange }) {
   };
   return <View style={styles.field}>
     <Text style={styles.text}>{label}</Text>
-    <Action onPress={open}>{value ? riyadhTime(value) : 'اختر التاريخ والوقت'}</Action>
+    <Action onPress={open}>{value ? (dateOnly ? calendarDate.format(new Date(value)) : riyadhTime(value)) : 'اختر التاريخ والوقت'}</Action>
     {selection && <Modal animationType="slide" onRequestClose={() => setSelection(null)}>
       <SafeAreaView style={styles.page}>
         <Text style={styles.title}>{label}</Text>
         <Text style={styles.text}>بتوقيت الرياض</Text>
-        <DateTimePicker mode="datetime" display="spinner" value={selection}
+        <DateTimePicker mode={dateOnly ? 'date' : 'datetime'} display="spinner" themeVariant="light" value={selection}
           timeZoneName={zone} onValueChange={(_, date) => setSelection(date)} />
         <Action primary onPress={() => { onChange(selection.toISOString()); setSelection(null); }}>تأكيد الموعد</Action>
         <Action onPress={() => setSelection(null)}>إلغاء</Action>
@@ -75,13 +78,14 @@ export function OfferLocation({ location, onChange }) {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, padding: 16, gap: 12, backgroundColor: '#f6f2f9' },
+  page: { flex: 1, padding: 16, gap: 12, backgroundColor: colors.background },
   field: { gap: 6 },
   map: { flex: 1, borderRadius: 14 },
-  title: { color: '#28173b', fontWeight: '800', fontSize: 24, textAlign: 'right' },
-  text: { color: '#4a3063', fontSize: 16, textAlign: 'right' },
-  action: { backgroundColor: '#eee4f5', borderRadius: 12, padding: 12, minHeight: 46, justifyContent: 'center' },
-  primary: { backgroundColor: '#512477' },
+  title: { color: colors.ink, fontWeight: '800', fontSize: 24, textAlign: 'right' },
+  text: { color: colors.muted, fontSize: 16, textAlign: 'right' },
+  action: { backgroundColor: colors.soft, borderRadius: 12, padding: 12, minHeight: 48, justifyContent: 'center' },
+  primary: { backgroundColor: colors.primary },
   white: { color: 'white', fontWeight: '700', textAlign: 'center' },
+  pressed: { opacity: 0.72 },
   disabled: { opacity: 0.45 },
 });

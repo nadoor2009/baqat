@@ -1,9 +1,10 @@
 import React from 'react';
+import { colors, Icon } from './ui';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 export const categories = [
-  ['food', 'غداء أو عشاء', '🍽️'], ['fun', 'ألعاب وترفيه', '🎮'],
-  ['travel', 'سفر وتجارب', '✈️'], ['stay', 'إقامة وفنادق', '🛏️'], ['other', 'أخرى', '✦'],
+  ['food', 'غداء أو عشاء'], ['fun', 'ألعاب وترفيه'],
+  ['travel', 'سفر وتجارب'], ['stay', 'إقامة وفنادق'], ['other', 'أخرى'],
 ];
 
 export const illustrations = {
@@ -31,27 +32,27 @@ export function sampleOffers(day) {
 export function Photo({ meal, style, uri }) {
   const [failed, setFailed] = React.useState(null);
   const fallback = illustrations[meal] || illustrations.both;
-  return <Image accessibilityIgnoresInvertColors source={{ uri: uri && failed !== uri ? uri : fallback }}
+  return <Image accessible={false} accessibilityIgnoresInvertColors source={{ uri: uri && failed !== uri ? uri : fallback }}
     onError={() => { if (uri) setFailed(uri); }}
     resizeMode="cover" style={[styles.photo, style]} />;
 }
 
 export function CategoryGrid({ onSelect }) {
-  return <View style={styles.grid}>{categories.map(([id, title, symbol]) =>
+  return <View style={styles.grid}>{categories.map(([id, title]) =>
     <Pressable key={id} accessibilityRole="button" onPress={() => onSelect(id)}
-      style={[styles.tile, id === 'food' && styles.featured]}>
-      <Text style={styles.symbol}>{symbol}</Text>
+      style={({ pressed }) => [styles.tile, id === 'food' && styles.featured, pressed && styles.pressed]}>
+      <Icon name={id} color={id === 'food' ? colors.onPrimary : colors.primary} />
       <Text style={[styles.title, id === 'food' && styles.featuredText]}>{title}</Text>
     </Pressable>)}</View>;
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 10 },
+  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
   tile: { flexGrow: 1, flexBasis: '29%', minHeight: 86, justifyContent: 'center', alignItems: 'center',
-    gap: 7, borderRadius: 16, backgroundColor: '#ece4f5', padding: 10 },
-  featured: { backgroundColor: '#623994' },
-  title: { fontSize: 15, fontWeight: '800', color: '#321c4d', textAlign: 'center' },
-  featuredText: { color: 'white' },
-  symbol: { fontSize: 25 },
-  photo: { width: '100%', height: 146, borderRadius: 12, backgroundColor: '#ece1f3' },
+    gap: 8, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, padding: 12 },
+  featured: { backgroundColor: colors.primary, borderColor: colors.primary },
+  title: { fontSize: 15, fontWeight: '800', color: colors.ink, textAlign: 'center' },
+  featuredText: { color: colors.onPrimary },
+  pressed: { opacity: 0.72 },
+  photo: { width: '100%', height: 146, borderRadius: 12, backgroundColor: colors.soft },
 });
