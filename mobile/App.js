@@ -500,13 +500,26 @@ function Mobile() {
             <Button label="اعرض الباقات المناسبة" disabled={busy} onPress={() => run(() => search(true))} />
         </Card>}
         {screen === 'results' && <>
-          <Title>{preview ? 'باقات تجريبية' : 'باقات غداء أو عشاء'}</Title>
-          <Copy>{filters.day} · حتى {filters.budget} ريال · {filters.people} أشخاص</Copy>
-          {preview && <Copy>أمثلة افتراضية لتجربة التطبيق.</Copy>}
-          <View style={styles.row}>
-            <Button label="عدّل البحث" secondary onPress={() => navigate('search')} />
-            <Button label="الخريطة" secondary disabled={!displayed.length} onPress={() => navigate('map')} />
-          </View>
+          <Card>
+            <Title>{preview ? 'باقات تجريبية' : 'نتائج البحث'}</Title>
+            <View style={styles.searchSummary}>
+              {[
+                ['الوجبة', meals.find(([id]) => id === filters.meal)?.[1]],
+                ['التاريخ', filters.day],
+                ['الأشخاص', filters.people],
+                ['الميزانية', 'حتى ' + money(Math.round(Number(normalize(filters.budget)) * 100))],
+                ['المنطقة', areas.find(([id]) => id === filters.area)?.[1]],
+              ].map(([label, value]) => <View key={label} style={styles.searchCriterion}>
+                <Text style={styles.label}>{label}</Text>
+                <Text style={styles.searchCriterionValue}>{value}</Text>
+              </View>)}
+            </View>
+            {preview && <Copy>أمثلة افتراضية لتجربة التطبيق.</Copy>}
+            <View style={styles.row}>
+              <Button label="عدّل البحث" secondary onPress={() => navigate('search')} />
+              <Button label="الخريطة" secondary disabled={!displayed.length} onPress={() => navigate('map')} />
+            </View>
+          </Card>
           <Choices options={[['default', 'نتائج البحث'], ['price', 'الأقل سعرًا'], ['person', 'الأقل للشخص']]} value={sort} change={setSort} />
           {selected.length >= 2 && <Button label={'قارن الباقات (' + selected.length + ')'} onPress={() => navigate('compare')} />}
           {displayed.length > 0 && <Title>الباقات المطابقة ({displayed.length})</Title>}
@@ -807,6 +820,9 @@ const styles = StyleSheet.create({
   homeFeature: { overflow: 'hidden', borderRadius: 24, backgroundColor: colors.deep },
   homePhoto: { height: 172, borderRadius: 0 },
   homeBody: { gap: 12, padding: 16 },
+  searchSummary: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
+  searchCriterion: { flexBasis: '43%', flexGrow: 1, backgroundColor: colors.soft, borderRadius: 12, padding: 10, gap: 3 },
+  searchCriterionValue: { color: colors.ink, textAlign: 'right', fontSize: 16, fontWeight: '700' },
   listing: { padding: 0, gap: 0, overflow: 'hidden' },
   listingLink: { minHeight: 48 },
   listingPhoto: { height: 148, borderRadius: 0 },
