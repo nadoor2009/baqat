@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, G, Defs, Mask, Rect, Circle } from 'react-native-svg';
 
 export const colors = {
   primary: '#512477',
@@ -21,7 +21,6 @@ const paths = {
   heart: 'M20.8 9.1c0 4.2-8.8 9.6-8.8 9.6s-8.8-5.4-8.8-9.6a4.5 4.5 0 0 1 8.8-1.3 4.5 4.5 0 0 1 8.8 1.3z',
   account: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z',
   pin: 'M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0z M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
-  ticket: 'M3 8l13-5 1 3 M3 9h18v3a2 2 0 1 0 0 4v4H3v-4a2 2 0 1 0 0-4z M15 11v2m0 3v2',
   food: 'M4 3v5a3 3 0 0 0 6 0V3 M7 3v18 M20 3v18 M20 3c-4 0-5 5-5 10h5',
   fun: 'M7 7h10c2 0 3 2 4 5l1 3a2 2 0 0 1-3 2l-3-2H8l-3 2a2 2 0 0 1-3-2l1-3c1-3 2-5 4-5z M6 11h4m-2-2v4m7-2h.1m3 0h.1',
   travel: 'M22 2 9 15 M22 2l-8 20-5-7-7-5 20-8z',
@@ -35,5 +34,25 @@ export function Icon({ name, color = colors.primary, size = 24, filled = false }
     accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
     <Path d={paths[name]} fill={filled ? color : 'none'} stroke={color} strokeWidth={1.75}
       strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>;
+}
+
+export function BrandMark({ size = 36, reversed = false }) {
+  return <Svg width={size} height={size} viewBox="0 0 120 120" accessible={false}>
+    <Defs>
+      <Mask id="ticketNotches" maskType="luminance">
+        <Rect width="120" height="120" fill="#FFFFFF" />
+        <Circle cx="29" cy="36" r="5.5" fill="#000000" />
+        <Circle cx="29" cy="84" r="5.5" fill="#000000" />
+      </Mask>
+    </Defs>
+    <G transform="translate(3 0)">
+      <G mask="url(#ticketNotches)">
+        <Path d="M26,14 H60 A22,22 0 0 1 60,58 H26 Z" fill={reversed ? '#FFC83D' : '#FF5C9D'} />
+        <Path d="M26,62 H66 A22,22 0 0 1 66,106 H26 Z" fill={reversed ? '#FFFFFF' : '#5B2EFF'} />
+      </G>
+      <Path d="M40,22 V98" stroke={reversed ? '#5B2EFF' : '#FFFFFF'}
+        strokeWidth="3" strokeDasharray="4 6" strokeLinecap="round" fill="none" />
+    </G>
   </Svg>;
 }

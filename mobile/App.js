@@ -1,4 +1,4 @@
-import { colors, Icon } from './ui';
+import { BrandMark, colors, Icon } from './ui';
 import { OfferDate, OfferLocation } from './OfferPickers';
 import VoucherScanner, { voucherCode } from './VoucherScanner';
 import * as SecureStore from 'expo-secure-store';
@@ -434,7 +434,7 @@ function Mobile() {
   return <SafeAreaView style={styles.safe}>
     <StatusBar barStyle="dark-content" />
     {screen !== 'welcome' && <View style={styles.header}>
-      <View style={styles.brand}><View style={styles.brandMark}><Icon name="ticket" color={colors.onPrimary} /></View>
+      <View style={styles.brand}><BrandMark />
         <Text style={styles.logo}>باقات</Text></View>
       <View style={styles.cityPill}><Icon name="pin" size={18} /><Text style={styles.city}>الرياض</Text></View>
     </View>}
@@ -443,7 +443,7 @@ function Mobile() {
         {!!note && <Text accessibilityLiveRegion="polite" style={styles.note}>{note}</Text>}
         {busy && <ActivityIndicator accessibilityLabel="جاري التحميل" color={colors.primary} />}
         {screen === 'welcome' && <View style={[styles.hero, styles.welcome]}>
-          <View style={styles.welcomeMark}><Icon name="ticket" size={40} color={colors.onPrimary} /></View>
+          <View style={styles.welcomeMark}><BrandMark size={52} reversed /></View>
           <Text style={styles.welcomeTitle}>باقات</Text>
           <Text style={styles.heroText}>أفضل الباقات في مكان واحد، بالوقت والمكان اللي تبيه.</Text>
           <View style={styles.collage}>
@@ -767,7 +767,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   brand: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flexShrink: 1 },
-  brandMark: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primary },
   cityPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.soft, borderRadius: 16 },
   logo: { color: colors.primary, fontSize: 28, fontWeight: '900' },
   city: { color: colors.muted, fontSize: 15 },
@@ -796,7 +795,7 @@ const styles = StyleSheet.create({
   welcomeContent: { flexGrow: 1, paddingBottom: 16 },
   welcome: { flexGrow: 1, justifyContent: 'center', gap: 16, backgroundColor: colors.deep },
   welcomeTitle: { textAlign: 'center', color: '#fff', fontSize: 44, fontWeight: '900' },
-  welcomeMark: { alignSelf: 'center', backgroundColor: colors.primary, padding: 12, borderRadius: 20 },
+  welcomeMark: { alignSelf: 'center', backgroundColor: '#5B2EFF', padding: 12, borderRadius: 20 },
   collage: { flexDirection: 'row', gap: 7, paddingHorizontal: 4, marginVertical: 16 },
   panelPhoto: { flex: 1, width: 0, height: 124, borderWidth: 2, borderColor: '#f5eaff' },
   leftPhoto: { transform: [{ rotate: '-7deg' }], marginTop: 12 },
