@@ -25,16 +25,46 @@ test('voucher issues once and can be used once only by the owner before expiry',
   sqlite.prepare('INSERT INTO merchants (user_id, name, approved) VALUES (?, ?, 1)')
     .run(owner, 'Test Merchant');
   const offer = crypto.randomUUID();
-  sqlite.prepare(`INSERT INTO offers VALUES
+  sqlite.prepare(`INSERT INTO offers (id, merchant_id, name, venue, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, starts_at, ends_at, published, image_url) VALUES
     (?, ?, 'Dinner', 'Venue', 'Hittin', 'Address', 1, 24.75, 46.65,
     11900, 2, 'dinner', 'Dinner for two', ?, ?, 1, NULL)`)
     .run(offer, owner, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString());
+  const legacyHash = 'a'.repeat(64);
+  sqlite.prepare('INSERT INTO vouchers VALUES (?, ?, ?, ?, ?, ?)').run(
+    legacyHash, customer, offer, '2020-01-01', '2020-01-02', '2020-01-01',
+  );
+  sqlite.exec(readFileSync(new URL('../migrations/0003_nationwide_catalog.sql', import.meta.url), 'utf8'));
+  assert.equal(sqlite.prepare('SELECT offer_id FROM vouchers WHERE token_hash = ?').get(legacyHash).offer_id, offer);
+  assert.deepEqual(sqlite.prepare('PRAGMA foreign_key_check').all(), []);
+  sqlite.prepare('DELETE FROM vouchers WHERE token_hash = ?').run(legacyHash);
   const env = { DB: { prepare }, FIREBASE_API_KEY: 'test-key' };
   const post = (path, token, body, method = 'POST') => worker.fetch(new Request('https://baqat.local/api/' + path, {
     method,
     headers: { Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
   }), env);
+  const nationwideDraft = await post('merchant/offers', owner, {
+    name: 'تجربة بحرية', venue: 'فرع جدة', city: 'جدة', category: 'travel',
+    district: 'الشاطئ', address: 'كورنيش جدة', north: false, latitude: 21.6, longitude: 39.1,
+    price_halalas: 9000, people: 2, inclusions: 'جولة لشخصين',
+    starts_at: new Date(Date.now() - 60000).toISOString(),
+    ends_at: new Date(Date.now() + 7200000).toISOString(),
+  });
+  assert.equal(nationwideDraft.status, 201);
+  const { id: jeddah } = await nationwideDraft.json();
+  sqlite.prepare('UPDATE offers SET published = 1 WHERE id = ?').run(jeddah);
+  const search = async extra => {
+    const day = new Date(Date.now() + 10800000).toISOString().slice(0, 10);
+    const params = new URLSearchParams({ day, meal: 'both', people: '1', budget: '20000', ...extra });
+    const response = await worker.fetch(new Request('https://baqat.local/api/offers?' + params), env);
+    assert.equal(response.status, 200);
+    return (await response.json()).map(item => item.id);
+  };
+  assert.deepEqual(await search({ category: 'all' }), [jeddah, offer]);
+  assert.deepEqual(await search({ category: 'travel', city: 'جدة', q: 'بحرية' }), [jeddah]);
+  assert.deepEqual(await search({ category: 'travel', city: 'الرياض' }), []);
+  assert.deepEqual(await search({ area: 'all' }), [offer]);
+  sqlite.prepare('UPDATE offers SET published = 0 WHERE id = ?').run(jeddah);
   const publicPage = () => worker.fetch(new Request('https://baqat.local/api/offers/' + offer + '/restaurant'), env);
   const restaurant = await (await publicPage()).json();
   assert.equal(restaurant.name, 'Test Merchant');
@@ -133,6 +163,10 @@ test('merchant approval requires an allowlisted verified account and is idempote
   });
   const account = await (await request('account', applicant)).json();
   assert.deepEqual(account, { merchant: { name: 'Test Merchant', approved: 1 }, admin: false });
+  const suspend = { user_id: applicant, approved: false };
+  assert.equal((await request('admin/merchants', applicant, suspend)).status, 403);
+  assert.equal((await request('admin/merchants', admin, suspend)).status, 200);
+  assert.equal((await (await request('account', applicant)).json()).merchant.approved, 0);
 });
 
 test('verified Saudi phone users have account access without admin privileges', async t => {

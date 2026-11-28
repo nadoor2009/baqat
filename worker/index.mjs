@@ -1,3 +1,4 @@
+const categories = new Set(['food', 'fun', 'travel', 'stay', 'other', 'sports', 'wellness', 'shopping', 'events', 'learning', 'services']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const meals = new Set(['lunch', 'dinner', 'both']);
 const iso = time => new Date(time).toISOString();
@@ -82,18 +83,26 @@ async function search(params, db) {
   const people = number(Number(params.get('people')), 1, 100, true);
   const budget = number(Number(params.get('budget')), 100, 10000000, true);
   const meal = params.get('meal');
-  const area = params.get('area');
+  const legacy = !params.has('category');
+  const area = params.get('area') ?? 'all';
+  const category = params.get('category') ?? 'food';
+  const city = params.get('city')?.trim() || (legacy ? 'الرياض' : '');
+  const query = params.get('q')?.trim() || '';
+  requireValid((category === 'all' || categories.has(category)) && city.length <= 80 && query.length <= 100);
   requireValid(Number.isFinite(start) && meals.has(meal) && ['all', 'north'].includes(area));
   const { results } = await db.prepare(`
-    SELECT o.id, o.name, o.venue, o.district, o.address, o.latitude, o.longitude,
+    SELECT o.id, o.name, o.venue, o.city, o.category, o.district, o.address, o.latitude, o.longitude,
            o.price_halalas, o.people, o.meal, o.inclusions, o.image_url, o.starts_at, o.ends_at
     FROM offers o JOIN merchants m ON m.user_id = o.merchant_id
     WHERE o.published = 1 AND m.approved = 1 AND o.starts_at < ? AND o.ends_at > ?
       AND o.price_halalas <= ? AND o.people >= ?
-      AND (? = 'both' OR o.meal IN (?, 'both'))
+      AND (? = 'all' OR o.category = ?)
+      AND (? = '' OR o.city = ? COLLATE NOCASE)
+      AND (o.category <> 'food' OR ? = 'both' OR o.meal IN (?, 'both'))
+      AND instr(lower(o.name || ' ' || o.venue || ' ' || o.district || ' ' || o.inclusions), lower(?)) > 0
       AND (? = 'all' OR o.north = 1)
     ORDER BY o.price_halalas, o.id LIMIT 100
-  `).bind(iso(start + 86400000), iso(Math.max(start, Date.now())), budget, people, meal, meal, area).all();
+  `).bind(iso(start + 86400000), iso(Math.max(start, Date.now())), budget, people, category, category, city, city, meal, meal, query, area).all();
   return results;
 }
 
@@ -104,7 +113,7 @@ async function publicRestaurant(db, offerId) {
   `).bind(offerId).first();
   if (!restaurant) throw new ApiError(404, 'OFFER_UNAVAILABLE');
   const { results } = await db.prepare(`
-    SELECT o.id, o.name, o.venue, o.district, o.address, o.latitude, o.longitude,
+    SELECT o.id, o.name, o.venue, o.city, o.category, o.district, o.address, o.latitude, o.longitude,
            o.price_halalas, o.people, o.meal, o.inclusions, o.image_url, o.starts_at, o.ends_at
     FROM offers o JOIN offers selected ON o.merchant_id = selected.merchant_id
     JOIN merchants m ON m.user_id = o.merchant_id
@@ -116,17 +125,19 @@ async function publicRestaurant(db, offerId) {
 }
 
 function offerValues(input) {
-  const { meal, north } = input;
-  requireValid(meals.has(meal) && typeof north === 'boolean');
+  const category = input.category ?? 'food';
+  const city = string(input.city ?? 'الرياض', 2, 80);
+  const meal = category === 'food' ? input.meal : 'both';
+  requireValid(categories.has(category) && meals.has(meal) && typeof input.north === 'boolean');
   const starts = Date.parse(string(input.starts_at, 16, 32));
   const ends = Date.parse(string(input.ends_at, 16, 32));
   requireValid(Number.isFinite(starts) && Number.isFinite(ends) && ends > Math.max(starts, Date.now()));
   return [
     string(input.name, 2, 120), string(input.venue, 2, 120),
-    string(input.district, 2, 80), string(input.address, 3, 240), Number(north),
-    number(input.latitude, 24.35, 25.10), number(input.longitude, 46.30, 47.10),
+    string(input.district, 2, 80), string(input.address, 3, 240), Number(city === 'الرياض' && input.north),
+    number(input.latitude, 16.3, 32.2), number(input.longitude, 34.4, 56.0),
     number(input.price_halalas, 100, 10000000, true), number(input.people, 1, 100, true),
-    meal, string(input.inclusions, 3, 1800), iso(starts), iso(ends),
+    meal, string(input.inclusions, 3, 1800), iso(starts), iso(ends), city, category,
   ];
 }
 
@@ -145,9 +156,9 @@ async function createOffer(db, uid, input) {
   const result = await db.prepare(`
     INSERT INTO offers (
       id, merchant_id, name, venue, district, address, north, latitude, longitude,
-      price_halalas, people, meal, inclusions, starts_at, ends_at, image_url
+      price_halalas, people, meal, inclusions, starts_at, ends_at, city, category, image_url
     )
-    SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    SELECT ?, m.user_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     FROM merchants m WHERE m.user_id = ? AND m.approved = 1
       AND (SELECT count(*) FROM offers WHERE merchant_id = m.user_id AND ends_at > ?) < 100
     RETURNING id
@@ -164,7 +175,7 @@ async function editOffer(db, uid, id, input) {
   const result = await db.prepare(`
     UPDATE offers SET name = ?, venue = ?, district = ?, address = ?, north = ?,
       latitude = ?, longitude = ?, price_halalas = ?, people = ?, meal = ?,
-      inclusions = ?, starts_at = ?, ends_at = ?,
+      inclusions = ?, starts_at = ?, ends_at = ?, city = ?, category = ?,
       image_url = CASE WHEN ? THEN ? ELSE image_url END
     WHERE id = ? AND merchant_id = ?
       AND EXISTS (SELECT 1 FROM merchants WHERE user_id = ? AND approved = 1)
@@ -290,11 +301,13 @@ async function reviewMerchants(request, db, uid, env) {
   if (request.method === 'POST') {
     const input = await body(request);
     const userId = string(input.user_id, 1, 128);
+    const approved = input.approved ?? true;
+    requireValid(typeof approved === 'boolean');
     const merchant = await db.prepare(
-      'UPDATE merchants SET approved = 1 WHERE user_id = ? AND approved = 0 RETURNING user_id',
-    ).bind(userId).first();
-    if (!merchant) throw new ApiError(409, 'MERCHANT_NOT_PENDING');
-    return json({ approved: true });
+      'UPDATE merchants SET approved = ? WHERE user_id = ? AND approved <> ? RETURNING user_id',
+    ).bind(Number(approved), userId, Number(approved)).first();
+    if (!merchant) throw new ApiError(409, 'MERCHANT_STATUS_CHANGED');
+    return json({ approved });
   }
   return json({ message: 'NOT_FOUND' }, 404);
 }
@@ -331,7 +344,7 @@ export default {
       }
       if (path === '/api/merchant/offers') {
         if (method === 'GET') {
-          const { results } = await db.prepare('SELECT id, name, venue, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, image_url, starts_at, ends_at, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
+          const { results } = await db.prepare('SELECT id, name, venue, city, category, district, address, north, latitude, longitude, price_halalas, people, meal, inclusions, image_url, starts_at, ends_at, published FROM offers WHERE merchant_id = ? ORDER BY starts_at DESC')
             .bind(uid).all();
           return json(results);
         }

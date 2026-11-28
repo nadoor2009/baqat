@@ -16,7 +16,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { api, authenticate, errorMessage, riyadhDay, riyadhTime } from './api';
 
 const meals = [['both', 'الغداء والعشاء'], ['lunch', 'الغداء'], ['dinner', 'العشاء']];
-const areas = [['north', 'شمال الرياض'], ['all', 'كل الرياض']];
+const categoriesWithAll = [['all', 'كل الأنشطة'], ...categories];
+const cityOptions = ['الرياض', 'جدة', 'مكة المكرمة', 'المدينة المنورة', 'الدمام', 'أبها', 'تبوك', 'بريدة',
+  'حائل', 'عرعر', 'سكاكا', 'جازان', 'نجران', 'الباحة'].map(city => [city, city]);
 const money = amount => new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 2 }).format(amount / 100) + ' ريال';
 const normalize = value => value.trim().replace(/[٠-٩]/g, digit => '٠١٢٣٤٥٦٧٨٩'.indexOf(digit)).replace(/٫/g, '.');
 
@@ -46,6 +48,23 @@ function Choices({ options, value, change }) {
     <Button key={id} label={label} selected={value === id} secondary={value !== id} onPress={() => change(id)} />)}</View>;
 }
 
+function Picker({ label, options, value, change, custom = false }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const select = id => { change(id); setOpen(false); setQuery(''); };
+  const selected = options.find(([id]) => id === value)?.[1] || value || 'اختر المدينة';
+  return <View style={styles.field}>
+    <Text style={styles.label}>{label}</Text>
+    <Button label={selected} secondary onPress={() => setOpen(!open)} />
+    {open && <>
+      {custom && <Input label="ابحث عن مدينة" value={query} onChangeText={setQuery} maxLength={80} />}
+      <Choices options={options.filter(([, name]) => name.includes(query.trim()))} value={value} change={select} />
+      {custom && query.trim().length >= 2 && !options.some(([id]) => id === query.trim()) &&
+        <Button label={'اختر ' + query.trim()} onPress={() => select(query.trim())} />}
+    </>}
+  </View>;
+}
+
 function Card({ children, style }) { return <View style={[styles.card, style]}>{children}</View>; }
 function Title({ children }) { return <Text accessibilityRole="header" style={styles.title}>{children}</Text>; }
 function Copy({ children }) { return <Text style={styles.copy}>{children}</Text>; }
@@ -56,11 +75,11 @@ function OfferCard({ offer, onOpen, selected, onCompare, saved, onSave }) {
       accessibilityLabel={offer.name + '، ' + money(offer.price_halalas)}
       accessibilityHint={offer.venue + '، ' + offer.district + (offer.sample ? '، عرض تجريبي' : '')}
       style={({ pressed }) => [styles.listingLink, pressed && styles.pressed]}>
-      <Photo uri={offer.image_url} meal={offer.meal} style={styles.listingPhoto} />
+      <Photo uri={offer.image_url} meal={offer.meal} category={offer.category} style={styles.listingPhoto} />
       <View style={styles.listingDetails}>
         {offer.sample && <Text style={styles.sample}>عرض تجريبي</Text>}
         <Title>{offer.name}</Title>
-        <Copy>{offer.venue} · {offer.district}</Copy>
+        <Copy>{offer.venue} · {offer.city || 'الرياض'} · {offer.district}</Copy>
         <View style={styles.listingMeta}>
           <Text style={styles.price}>{money(offer.price_halalas)}</Text>
           <Copy>حتى {offer.people} أشخاص</Copy>
@@ -81,15 +100,20 @@ const offerFields = [
   ['price', 'السعر النهائي بالريال', 'decimal-pad'], ['people', 'عدد الأشخاص', 'number-pad'],
   ['inclusions', 'مكونات الباقة'], ['image_url', 'رابط صورة الباقة (اختياري)', 'url'],
 ];
-const emptyOffer = { meal: 'both', north: true };
+const emptyOffer = { meal: 'both', north: false, category: 'food', city: '' };
 
 const voucherLabels = { active: 'ساري', used: 'مستخدم', expired: 'منتهي', unavailable: 'غير متاح' };
 const voucherKey = (uid, offerId) => 'baqat.voucher.' + encodeURIComponent(uid).replace(/%/g, '-') + '.' + offerId;
 
 function Mobile() {
   const [screen, setScreen] = useState('welcome');
-  const [filters, setFilters] = useState({ day: riyadhDay(), people: '2', budget: '200', meal: 'both', area: 'north' });
-  const [category, setCategory] = useState('food');
+  const [filters, setFilters] = useState({ day: riyadhDay(), people: '1', budget: '', meal: 'both', city: '', category: 'all', q: '' });
+  const [advanced, setAdvanced] = useState(false);
+  const [applied, setApplied] = useState(filters);
+  const [admin, setAdmin] = useState(false);
+  const [reviews, setReviews] = useState(null);
+  const [status, setStatus] = useState('pending');
+  const [merchantQuery, setMerchantQuery] = useState('');
   const [sort, setSort] = useState('default');
   const [preview, setPreview] = useState(false);
   const [favorites, setFavorites] = useState({});
@@ -138,6 +162,10 @@ function Mobile() {
     setSms('');
     setLinkingPhone(false);
     setMerchant(null);
+    setAdmin(false);
+    setReviews(null);
+    setStatus('pending');
+    setMerchantQuery('');
     setMerchantOffers([]);
     cancelEdit();
     setVouchers({});
@@ -163,16 +191,17 @@ function Mobile() {
   }
 
   async function search(showResults = false) {
-    const day = normalize(filters.day);
-    const people = Number(normalize(filters.people));
-    const budget = Math.round(Number(normalize(filters.budget)) * 100);
+    const searchFilters = showResults ? filters : applied;
+    const day = normalize(searchFilters.day);
+    const people = Number(normalize(searchFilters.people));
+    const budget = searchFilters.budget.trim() ? Math.round(Number(normalize(searchFilters.budget)) * 100) : 10000000;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isInteger(people) || people < 1 || people > 100 ||
         !Number.isFinite(budget) || budget < 100 || budget > 10000000) throw new Error('INVALID_INPUT');
-    const query = Object.entries({ ...filters, day, people, budget })
+    const query = Object.entries({ ...searchFilters, day, people, budget })
       .map(([key, value]) => key + '=' + encodeURIComponent(value)).join('&');
     const results = await api('offers?' + query);
     setOffers(results);
-    if (showResults) { setPreview(false); navigate('results'); }
+    if (showResults) { setApplied(searchFilters); setPreview(false); navigate('results'); }
     setSearched(true);
     setSelected(current => results.filter(item => current.some(chosen => chosen.id === item.id)));
   }
@@ -207,8 +236,8 @@ function Mobile() {
   }
 
   function selectCategory(id) {
-    setCategory(id);
-    navigate(id === 'food' ? 'search' : 'category');
+    setFilters(current => ({ ...current, category: id, meal: 'both' }));
+    navigate('search');
   }
 
   function showPreview() {
@@ -230,9 +259,16 @@ function Mobile() {
   }
 
   async function refreshMerchant(authToken) {
-    const [profile] = await api('merchant', { token: authToken });
+    const { merchant: profile, admin: allowed } = await api('account', { token: authToken });
+    setAdmin(allowed);
     setMerchant(profile || null);
     if (profile?.approved) setMerchantOffers(await api('merchant/offers', { token: authToken }));
+  }
+
+  async function loadReviews(nextStatus) {
+    const data = await api('admin/merchants?status=' + nextStatus + '&q=' + encodeURIComponent(merchantQuery.trim()), { token });
+    setStatus(nextStatus);
+    setReviews(data);
   }
 
   async function finishPhone(pending, code) {
@@ -351,7 +387,7 @@ function Mobile() {
     const fields = Object.fromEntries(offerFields.map(([key]) => [key, String(item[key] ?? '')]));
     setDraft({
       ...fields, price: String(item.price_halalas / 100), meal: item.meal, north: Boolean(item.north),
-      district: item.district, address: item.address,
+      district: item.district, address: item.address, city: item.city || 'الرياض', category: item.category || 'food',
       location: { latitude: item.latitude, longitude: item.longitude },
       starts_at: item.starts_at, ends_at: item.ends_at,
     });
@@ -374,6 +410,7 @@ function Mobile() {
           return invalid(`حقل «${label}» يحتاج من ${min} إلى ${max} حرفًا.`);
         }
       }
+      if (!draft.city) return invalid('اختر مدينة الفرع.');
       if (!draft.location) return invalid('حدد موقع الفرع على الخريطة.');
       const { latitude, longitude } = draft.location;
       const people = Number(normalize(draft.people || ''));
@@ -398,8 +435,10 @@ function Mobile() {
       await api(path, { token, method: editingOffer ? 'PUT' : 'POST', body: {
         name: draft.name.trim(),
         venue,
-        district: draft.district || (draft.north ? 'شمال الرياض' : 'الرياض'),
-        address: draft.address || (draft.north ? 'شمال الرياض' : 'الرياض'),
+        district: draft.district?.trim() || draft.city,
+        address: draft.address?.trim() || draft.city,
+        city: draft.city,
+        category: draft.category,
         meal: draft.meal,
         north: draft.north,
         inclusions: draft.inclusions.trim(),
@@ -420,7 +459,7 @@ function Mobile() {
   }
 
   const activeOffers = preview ? sampleOffers(normalize(filters.day) || riyadhDay()).filter(item =>
-    item.people >= Number(normalize(filters.people)) && item.price_halalas <= Number(normalize(filters.budget)) * 100 &&
+    item.people >= Number(normalize(filters.people)) && (!filters.budget.trim() || item.price_halalas <= Number(normalize(filters.budget)) * 100) &&
     (filters.meal === 'both' || item.meal === 'both' || item.meal === filters.meal)) : offers;
   const displayed = [...activeOffers];
   if (sort === 'price') displayed.sort((a, b) => a.price_halalas - b.price_halalas);
@@ -429,6 +468,12 @@ function Mobile() {
   const dateAfter = days => new Date(Date.parse(today + 'T00:00:00Z') + days * 86400000).toISOString().slice(0, 10);
   const weekday = new Date(today + 'T00:00:00Z').getUTCDay();
   const weekend = dateAfter(weekday === 6 ? 0 : (5 - weekday + 7) % 7);
+  const initialMapRegion = displayed.length ? {
+    latitude: applied.city && !preview ? displayed[0].latitude : 24.2,
+    longitude: applied.city && !preview ? displayed[0].longitude : 44.8,
+    latitudeDelta: applied.city && !preview ? 0.3 : 16,
+    longitudeDelta: applied.city && !preview ? 0.3 : 23,
+  } : null;
   const voucher = offer ? vouchers[offer.id] : null;
   const activeVoucher = voucher && Date.parse(voucher.expires_at) > Date.now();
   return <SafeAreaView style={styles.safe}>
@@ -436,7 +481,9 @@ function Mobile() {
     {screen !== 'welcome' && <View style={styles.header}>
       <View style={styles.brand}><BrandMark />
         <Text style={styles.logo}>باقات</Text></View>
-      <View style={styles.cityPill}><Icon name="pin" size={18} /><Text style={styles.city}>الرياض</Text></View>
+      <Pressable style={styles.cityPill} accessibilityRole="button" onPress={() => navigate('search')}>
+        <Icon name="pin" size={18} /><Text style={styles.city} numberOfLines={1}>{filters.city || 'كل المملكة'}</Text>
+      </Pressable>
     </View>}
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, screen === 'welcome' && styles.welcomeContent]}>
@@ -456,10 +503,10 @@ function Mobile() {
         </View>}
         {screen === 'home' && <>
           <View style={styles.homeFeature}>
-            <Photo meal="both" style={styles.homePhoto} />
+            <View style={styles.heroTicket}><BrandMark size={70} reversed /></View>
             <View style={styles.homeBody}>
-              <Text accessibilityRole="header" style={styles.heroTitle}>وش ودّك تاكل اليوم؟</Text>
-              <Text style={styles.heroText}>اكتشف باقات الغداء والعشاء في الرياض حسب وقتك وميزانيتك.</Text>
+              <Text accessibilityRole="header" style={styles.heroTitle}>وش ودّك تسوي اليوم؟</Text>
+              <Text style={styles.heroText}>مطاعم وتجارب وأنشطة في كل المملكة.</Text>
               <Button label="ابحث عن باقة" icon="search" secondary onPress={() => navigate('search')} />
             </View>
           </View>
@@ -468,15 +515,19 @@ function Mobile() {
           <Button label="جرّب عروضًا افتراضية" secondary onPress={showPreview} />
           <Button label="شاشة الترحيب" secondary onPress={() => navigate('welcome')} />
         </>}
-        {screen === 'category' && <Card>
-          <Title>{categories.find(([id]) => id === category)?.[1]}</Title>
-          <Copy>هذه الفئة غير متاحة حاليًا. باقات المطاعم هي المتاحة للبحث الآن.</Copy>
-          <Button label="تصفح باقات المطاعم" onPress={() => navigate('search')} />
-        </Card>}
         {screen === 'search' && <Card>
-            <Title>حدد احتياجك</Title>
-            <Copy>وش تبي؟</Copy>
-            <Choices options={meals} value={filters.meal} change={meal => setFilters({ ...filters, meal })} />
+            <Title>ابحث عن باقة</Title>
+            <Picker label="المدينة" options={[[ '', 'كل المملكة' ], ...cityOptions]} value={filters.city} custom
+              change={city => setFilters(current => ({ ...current, city }))} />
+            <Picker label="النشاط" options={categoriesWithAll} value={filters.category}
+              change={category => setFilters(current => ({ ...current, category, meal: 'both' }))} />
+            <Button label={advanced ? 'إخفاء خيارات البحث' : 'التاريخ والميزانية وخيارات البحث'} secondary
+              onPress={() => setAdvanced(!advanced)} />
+            {advanced && <>
+            <Input label="اسم الباقة أو المنشأة" value={filters.q} maxLength={100}
+              onChangeText={q => setFilters(current => ({ ...current, q }))} />
+            {filters.category === 'food' && <Choices options={meals} value={filters.meal}
+              change={meal => setFilters(current => ({ ...current, meal }))} />}
             <Copy>متى؟</Copy>
             <View style={styles.row}>
               <Button label="اليوم" selected={filters.day === today} secondary={filters.day !== today}
@@ -493,27 +544,16 @@ function Mobile() {
               <Text style={styles.stepper}>{filters.people}</Text>
               <Button label="+" accessibilityLabel="زد عدد الأشخاص" secondary disabled={Number(filters.people) >= 100} onPress={() => setFilters({ ...filters, people: String(Number(filters.people) + 1) })} />
             </View>
-            <Input label="الميزانية القصوى بالريال" value={filters.budget} keyboardType="decimal-pad" ltr
+            <Input label="الميزانية القصوى بالريال (اختياري)" value={filters.budget} keyboardType="decimal-pad" ltr
               onChangeText={budget => setFilters({ ...filters, budget })} />
-            <Copy>المكان</Copy>
-            <Choices options={areas} value={filters.area} change={area => setFilters({ ...filters, area })} />
+            </>}
             <Button label="اعرض الباقات المناسبة" disabled={busy} onPress={() => run(() => search(true))} />
         </Card>}
         {screen === 'results' && <>
           <Card>
             <Title>{preview ? 'باقات تجريبية' : 'نتائج البحث'}</Title>
-            <View style={styles.searchSummary}>
-              {[
-                ['الوجبة', meals.find(([id]) => id === filters.meal)?.[1]],
-                ['التاريخ', filters.day],
-                ['الأشخاص', filters.people],
-                ['الميزانية', 'حتى ' + money(Math.round(Number(normalize(filters.budget)) * 100))],
-                ['المنطقة', areas.find(([id]) => id === filters.area)?.[1]],
-              ].map(([label, value]) => <View key={label} style={styles.searchCriterion}>
-                <Text style={styles.label}>{label}</Text>
-                <Text style={styles.searchCriterionValue}>{value}</Text>
-              </View>)}
-            </View>
+            <Copy>{preview ? 'أمثلة من الرياض' : (applied.city || 'كل المملكة') + ' · ' + categoriesWithAll.find(([id]) => id === applied.category)?.[1]}</Copy>
+            {!preview && <Copy>{applied.day} · {applied.people} {applied.people === '1' ? 'شخص' : 'أشخاص'}{applied.budget.trim() ? ' · حتى ' + money(Math.round(Number(normalize(applied.budget)) * 100)) : ''}</Copy>}
             {preview && <Copy>أمثلة افتراضية لتجربة التطبيق.</Copy>}
             <View style={styles.row}>
               <Button label="عدّل البحث" secondary onPress={() => navigate('search')} />
@@ -540,8 +580,7 @@ function Mobile() {
         {screen === 'map' && displayed.length > 0 && <>
           <Title>الباقات على الخريطة</Title>
           {preview && <Copy>المواقع المعروضة أمثلة افتراضية.</Copy>}
-          {Platform.OS === 'ios' && <MapView style={styles.map} initialRegion={{ latitude: displayed[0].latitude,
-            longitude: displayed[0].longitude, latitudeDelta: 0.15, longitudeDelta: 0.15 }}>
+          {Platform.OS === 'ios' && <MapView style={styles.map} initialRegion={initialMapRegion}>
             {displayed.map(item => <Marker key={item.id}
               coordinate={{ latitude: item.latitude, longitude: item.longitude }}
               title={item.name} description={money(item.price_halalas)} onCalloutPress={() => openOffer(item)} />)}
@@ -553,7 +592,7 @@ function Mobile() {
         {screen === 'compare' && <>
           <Title>مقارنة الباقات</Title>
           {selected.map(item => <Card key={item.id}>
-            <Photo uri={item.image_url} meal={item.meal} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
+            <Photo uri={item.image_url} meal={item.meal} category={item.category} /><Title>{item.name}</Title><Text style={styles.price}>{money(item.price_halalas)}</Text>
             <Copy>{item.venue} · {item.district} · حتى {item.people} أشخاص</Copy>
             <Copy>{item.inclusions}</Copy><Copy>{riyadhTime(item.starts_at)} إلى {riyadhTime(item.ends_at)}</Copy>
             <Button label="عرض التفاصيل" onPress={() => { setOffer(item); navigate('detail'); }} />
@@ -563,7 +602,7 @@ function Mobile() {
         {screen === 'restaurant' && restaurant && <>
           <View style={styles.hero}>
             <Text style={styles.heroTitle}>{restaurant.name}</Text>
-            <Text style={styles.heroText}>باقات المطعم</Text>
+            <Text style={styles.heroText}>باقات المنشأة</Text>
           </View>
           {!restaurant.offers.length && <Card><Copy>ما فيه باقات متاحة حاليًا.</Copy></Card>}
           {restaurant.offers.map(item => <OfferCard key={item.id} offer={item}
@@ -572,11 +611,11 @@ function Mobile() {
             onCompare={() => toggleCompare(item)} />)}
         </>}
         {screen === 'detail' && offer && <Card>
-          <Photo uri={offer.image_url} meal={offer.meal} style={styles.detailPhoto} />
+          <Photo uri={offer.image_url} meal={offer.meal} category={offer.category} style={styles.detailPhoto} />
           {offer.sample && <Copy>عرض تجريبي · الصور توضيحية</Copy>}
           <Title>{offer.name}</Title><Text style={styles.price}>{money(offer.price_halalas)}</Text>
-          <Copy>{offer.venue} · {offer.district} · حتى {offer.people} أشخاص</Copy>
-          {!offer.sample && <Button label="عرض صفحة المطعم" secondary disabled={busy}
+          <Copy>{offer.venue} · {offer.city || 'الرياض'} · {offer.district} · حتى {offer.people} أشخاص</Copy>
+          {!offer.sample && <Button label="عرض صفحة المنشأة" secondary disabled={busy}
             onPress={() => run(async () => {
               setRestaurant(await api('offers/' + offer.id + '/restaurant'));
               navigate('restaurant');
@@ -621,7 +660,10 @@ function Mobile() {
           </Card>)}
         </>}
         {screen === 'account' && <>
-          <Title>حسابي</Title>
+          <View style={styles.hero}>
+            <Text accessibilityRole="header" style={styles.heroTitle}>{merchant?.name || 'حسابي'}</Text>
+            <Text style={styles.heroText}>{admin ? 'إدارة باقات' : merchant?.approved ? 'حساب مقدم خدمة' : token ? 'حساب العميل' : 'سجّل الدخول للوصول إلى حسابك'}</Text>
+          </View>
           {(!token && firebase && !emailMode || linkingPhone) && <Card>
             <Title>{linkingPhone ? 'اربط جوالك بحسابك الحالي' : 'الدخول برقم الجوال'}</Title>
             {!challenge ? <>
@@ -655,6 +697,10 @@ function Mobile() {
             {firebase && <Button label="الدخول بالجوال" secondary disabled={busy} onPress={() => setEmailMode(false)} />}
           </Card>}
           {token && !linkingPhone && <>
+            {admin && <Button label="لوحة الإدارة" disabled={busy} onPress={() => run(async () => {
+              await loadReviews(status);
+              navigate('admin');
+            })} />}
             <Button label="رموزي" disabled={busy} onPress={openMyVouchers} />
             {firebase && !firebase.currentUser?.phoneNumber && <Button label="اربط رقم جوالك بحسابك" secondary disabled={busy}
               onPress={() => setLinkingPhone(true)} />}
@@ -672,6 +718,29 @@ function Mobile() {
             {merchant?.approved ? <Button label="لوحة منشأتي" onPress={() => navigate('merchant')} /> : null}
             <Button label="تسجيل الخروج" disabled={busy} secondary onPress={() => { signOut(); setNote('تم تسجيل الخروج.'); }} />
           </>}
+        </>}
+        {screen === 'admin' && admin && <>
+          <View style={styles.hero}>
+            <Text accessibilityRole="header" style={styles.heroTitle}>لوحة الإدارة</Text>
+            <Text style={styles.heroText}>{reviews?.pending} بانتظار المراجعة · {reviews?.approved} منشأة معتمدة</Text>
+          </View>
+          <Card>
+            <Input label="ابحث باسم المنشأة" maxLength={100} value={merchantQuery} onChangeText={setMerchantQuery} />
+            <Button label="ابحث" secondary disabled={busy} onPress={() => run(() => loadReviews(status))} />
+          </Card>
+          <Choices options={[[ 'pending', 'طلبات المراجعة' ], [ 'approved', 'المنشآت المعتمدة' ]]}
+            value={status} change={nextStatus => run(() => loadReviews(nextStatus))} />
+          {reviews?.merchants.length === 0 && <Card><Copy>لا توجد منشآت في هذه القائمة.</Copy></Card>}
+          {reviews?.merchants.map(item => <Card key={item.user_id}>
+            <Title>{item.name}</Title>
+            <Button label={status === 'pending' ? 'اعتماد المنشأة' : 'إيقاف اعتماد المنشأة'}
+              disabled={busy} onPress={() => run(async () => {
+                await api('admin/merchants', { method: 'POST', token, body: {
+                  user_id: item.user_id, approved: status === 'pending',
+                } });
+                await loadReviews(status);
+              })} />
+          </Card>)}
         </>}
         {screen === 'merchant' && merchant?.approved ? <>
           <View style={styles.hero}>
@@ -694,7 +763,7 @@ function Mobile() {
                   <Copy>{money(item.price_halalas)} · {item.people} أشخاص</Copy>
                   <Copy>حتى {riyadhTime(item.ends_at)}</Copy>
                 </View>
-                <Photo uri={item.image_url} meal={item.meal} style={styles.thumbnail} />
+                <Photo uri={item.image_url} meal={item.meal} category={item.category} style={styles.thumbnail} />
               </View>
               <View style={styles.row}>
                 <Button label="تعديل" secondary disabled={busy} onPress={() => editOffer(item)} />
@@ -735,14 +804,22 @@ function Mobile() {
               maxLength={{ name: 120, venue: 120, inclusions: 1800, image_url: 2048 }[key]}
               multiline={key === 'inclusions'}
               onChangeText={value => setDraft(current => ({ ...current, [key]: value }))} />)}
-            <Choices options={meals} value={draft.meal} change={meal => setDraft(current => ({ ...current, meal }))} />
+            <Picker label="نشاط الباقة" options={categories} value={draft.category}
+              change={category => setDraft(current => ({ ...current, category, meal: 'both' }))} />
+            {draft.category === 'food' && <Choices options={meals} value={draft.meal}
+              change={meal => setDraft(current => ({ ...current, meal }))} />}
           </Card>
           <Card>
             <Title>الموقع</Title>
+            <Picker label="مدينة الفرع" options={cityOptions} value={draft.city} custom
+              change={city => setDraft(current => ({ ...current, city, north: city === current.city && current.north, district: city === current.city ? current.district : '',
+                address: city === current.city ? current.address : '', location: city === current.city ? current.location : null }))} />
+            <Input label="الحي" value={draft.district || ''} maxLength={80}
+              onChangeText={district => setDraft(current => ({ ...current, district }))} />
+            <Input label="العنوان" value={draft.address || ''} maxLength={240}
+              onChangeText={address => setDraft(current => ({ ...current, address }))} />
             <OfferLocation location={draft.location}
-              onChange={location => setDraft(current => ({ ...current, location, district: undefined, address: undefined }))} />
-            <Choices options={[[true, 'شمال الرياض'], [false, 'بقية الرياض']]} value={draft.north}
-              change={north => setDraft(current => ({ ...current, north, district: undefined, address: undefined }))} />
+              onChange={location => setDraft(current => ({ ...current, location }))} />
           </Card>
           <Card>
             <Title>فترة التوفر</Title>
@@ -780,9 +857,9 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   header: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8, gap: 8 },
   brand: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, flexShrink: 1 },
-  cityPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.soft, borderRadius: 16 },
+  cityPill: { flexDirection: 'row-reverse', alignItems: 'center', gap: 4, maxWidth: '55%', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#FFC83D', borderRadius: 16 },
   logo: { color: colors.primary, fontSize: 28, fontWeight: '900' },
-  city: { color: colors.muted, fontSize: 15 },
+  city: { flexShrink: 1, color: colors.ink, fontSize: 15 },
   content: { padding: 16, paddingBottom: 32, gap: 16, width: '100%', maxWidth: 640, alignSelf: 'center' },
   hero: { backgroundColor: colors.primary, padding: 22, borderRadius: 20, gap: 7 },
   heroTitle: { color: 'white', fontSize: 29, fontWeight: '900', textAlign: 'right' },
@@ -816,13 +893,10 @@ const styles = StyleSheet.create({
   offerRow: { flexDirection: 'row-reverse', gap: 12, alignItems: 'center' },
   offerText: { flex: 1, gap: 4 },
   thumbnail: { width: 92, height: 104 },
-  sample: { color: '#4f356a', backgroundColor: '#f1e7f8', fontWeight: '700', alignSelf: 'flex-end', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  sample: { color: '#4f356a', backgroundColor: '#FFDFED', fontWeight: '700', alignSelf: 'flex-end', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   homeFeature: { overflow: 'hidden', borderRadius: 24, backgroundColor: colors.deep },
-  homePhoto: { height: 172, borderRadius: 0 },
+  heroTicket: { alignSelf: 'flex-end', backgroundColor: colors.primary, margin: 16, marginBottom: 0, borderRadius: 22 },
   homeBody: { gap: 12, padding: 16 },
-  searchSummary: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 8 },
-  searchCriterion: { flexBasis: '43%', flexGrow: 1, backgroundColor: colors.soft, borderRadius: 12, padding: 10, gap: 3 },
-  searchCriterionValue: { color: colors.ink, textAlign: 'right', fontSize: 16, fontWeight: '700' },
   listing: { padding: 0, gap: 0, overflow: 'hidden' },
   listingLink: { minHeight: 48 },
   listingPhoto: { height: 148, borderRadius: 0 },

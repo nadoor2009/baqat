@@ -55,8 +55,8 @@ export function OfferDate({ label, value, suggested, onChange, dateOnly = false 
 export function OfferLocation({ location, onChange }) {
   const [open, setOpen] = useState(false);
   const [pin, setPin] = useState(null);
-  const valid = pin && pin.latitude >= 24.35 && pin.latitude <= 25.10 &&
-    pin.longitude >= 46.30 && pin.longitude <= 47.10;
+  const valid = pin && pin.latitude >= 16.3 && pin.latitude <= 32.2 &&
+    pin.longitude >= 34.4 && pin.longitude <= 56.0;
   return <View style={styles.field}>
     <Action onPress={() => { setPin(location); setOpen(true); }}>
       {location ? 'تعديل موقع الفرع على الخريطة' : 'حدد موقع الفرع على الخريطة'}
@@ -65,8 +65,8 @@ export function OfferLocation({ location, onChange }) {
     {open && <Modal animationType="slide" onRequestClose={() => setOpen(false)}>
       <SafeAreaView style={styles.page}>
         <Text style={styles.title}>موقع الفرع</Text>
-        <Text style={styles.text}>{pin && !valid ? 'اختر موقعًا داخل النطاق المدعوم في الرياض.' : 'حرّك الخريطة وكبّرها، ثم اضغط على مكان الفرع.'}</Text>
-        <MapView style={styles.map} initialRegion={{ ...(location || center), latitudeDelta: 0.12, longitudeDelta: 0.12 }}
+        <Text style={styles.text}>{pin && !valid ? 'اختر موقعًا داخل النطاق المدعوم في السعودية.' : 'حرّك الخريطة وكبّرها، ثم اضغط على مكان الفرع.'}</Text>
+        <MapView style={styles.map} initialRegion={{ ...(location || center), latitudeDelta: location ? 0.12 : 13, longitudeDelta: location ? 0.12 : 13 }}
           onPress={event => setPin(event.nativeEvent.coordinate)}>
           {pin && <Marker coordinate={pin} title="موقع الفرع" />}
         </MapView>

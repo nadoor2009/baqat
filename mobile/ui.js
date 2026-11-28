@@ -2,14 +2,14 @@ import React from 'react';
 import Svg, { Path, G, Defs, Mask, Rect, Circle } from 'react-native-svg';
 
 export const colors = {
-  primary: '#512477',
-  deep: '#352052',
-  background: '#F8F5FA',
+  primary: '#5B2EFF',
+  deep: '#211345',
+  background: '#FFFBF4',
   surface: '#FFFFFF',
-  ink: '#261934',
+  ink: '#211345',
   muted: '#5B4969',
-  soft: '#EFE7F7',
-  border: '#E4D9EB',
+  soft: '#EEE8FF',
+  border: '#E5DDF3',
   outline: '#877393',
   onPrimary: '#FFFFFF',
   onDeep: '#F1E7FA',
